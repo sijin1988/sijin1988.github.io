@@ -700,7 +700,7 @@ function closeModal(){ document.getElementById('modalOverlay').style.display='no
 
 document.getElementById('newTaskBtn').onclick = ()=>openModal(null);
 document.getElementById('cancelModalBtn').onclick = closeModal;
-document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
+// 배경(바깥) 클릭으로는 닫히지 않도록 함 — 작업 중인 내용이 실수로 사라지는 것을 방지
 document.getElementById('addItemBtn').onclick = ()=>{
   document.getElementById('fItems').appendChild(makeItemRow({text:'', assignee:''}));
 };
