@@ -68,8 +68,9 @@
   .task-row .note{font-size:12px;color:var(--ink-soft);margin-top:2px;}
   .task-row .subitems{margin-top:4px;}
   .task-row .subitem{font-size:12px;color:var(--ink-soft);}
-  .item-row{display:grid;grid-template-columns:112px 1fr auto;gap:6px;margin-bottom:6px;align-items:center;}
+  .item-row{display:grid;grid-template-columns:100px 1fr 84px auto;gap:6px;margin-bottom:6px;align-items:center;}
   .item-row select.item-assignee{width:100%;border:1px solid var(--line);border-radius:7px;padding:6px 6px;font-size:12.5px;font-family:inherit;background:var(--surface-alt);}
+  .item-row select.item-status{width:100%;border:1px solid var(--line);border-radius:7px;padding:6px 4px;font-size:12px;font-family:inherit;background:var(--surface-alt);}
   .item-row input.item-text{width:100%;border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:12.5px;font-family:inherit;background:var(--surface-alt);}
   .task-row .assignees{display:flex;flex-wrap:wrap;gap:4px;}
   .task-row .dates{font-size:11.5px;color:var(--ink-soft);white-space:nowrap;}
@@ -450,7 +451,7 @@ function renderTaskRow(t){
   const row = document.createElement('div');
   row.className='task-row';
   const assigneesHtml = (t.assignees||[]).map(a=>`<span class="chip">${a}</span>`).join('') || '<span class="chip">미배정</span>';
-  const itemsHtml = (t.items&&t.items.length) ? `<div class="subitems">${t.items.map(it=>`<div class="subitem">· <b>${escapeHtml(it.assignee||'미배정')}</b> — ${escapeHtml(it.text)}</div>`).join('')}</div>` : '';
+  const itemsHtml = (t.items&&t.items.length) ? `<div class="subitems">${t.items.map(it=>`<div class="subitem">· <b>${escapeHtml(it.assignee||'미배정')}</b> — ${escapeHtml(it.text)} <span class="badge s-${it.status||t.status}" style="margin-left:2px">${STATUSES[it.status||t.status]}</span></div>`).join('')}</div>` : '';
   row.innerHTML = `
     <span class="badge b-${t.track}">${TRACKS[t.track]}</span>
     <span class="badge s-${t.status}">${STATUSES[t.status]}</span>
@@ -579,17 +580,19 @@ function renderPersonBoard(){
     const entries = [];
     const leaveTasks = [];
     data.tasks.filter(passesFilter).forEach(t=>{
-      if(hideDone && t.status==='done') return;
       if(t.track==='leave'){
         if((t.assignees||[]).includes(name)) leaveTasks.push(t);
         return;
       }
       if(t.items && t.items.length){
         t.items.filter(it=>it.assignee===name).forEach(it=>{
-          entries.push({task:t, text: it.text, isItem:true});
+          const st = it.status||t.status;
+          if(hideDone && st==='done') return;
+          entries.push({task:t, text: it.text, status: st, isItem:true});
         });
       }else if((t.assignees||[]).includes(name)){
-        entries.push({task:t, text: t.title, isItem:false});
+        if(hideDone && t.status==='done') return;
+        entries.push({task:t, text: t.title, status: t.status, isItem:false});
       }
     });
     entries.sort((a,b)=> periodOrderVal(a.task.period||'기간 미지정') - periodOrderVal(b.task.period||'기간 미지정'));
@@ -615,7 +618,7 @@ function renderPersonBoard(){
         const t = entry.task;
         const row = document.createElement('div'); row.className='ptask';
         row.innerHTML = `<span class="badge b-${t.track}">${TRACKS[t.track]}</span>
-          <div><div class="ttl">${escapeHtml(entry.text)}</div><div class="meta">${entry.isItem?escapeHtml(t.title)+' · ':''}${t.period||''}${(t.start||t.end)?' · '+fmtDate(t.start)+' ~ '+fmtDate(t.end):''} · <span class="badge s-${t.status}" style="margin-left:2px">${STATUSES[t.status]}</span></div></div>`;
+          <div><div class="ttl">${escapeHtml(entry.text)}</div><div class="meta">${entry.isItem?escapeHtml(t.title)+' · ':''}${t.period||''}${(t.start||t.end)?' · '+fmtDate(t.start)+' ~ '+fmtDate(t.end):''} · <span class="badge s-${entry.status}" style="margin-left:2px">${STATUSES[entry.status]}</span></div></div>`;
         row.style.cursor='pointer';
         row.onclick = ()=>openModal(t);
         card.appendChild(row);
@@ -682,15 +685,26 @@ function makeItemRow(item){
   });
   const text = document.createElement('input');
   text.type='text'; text.className='item-text'; text.placeholder='업무 내용 (예: Mobile-Saturn 8건)'; text.value = item.text||'';
+  const status = document.createElement('select');
+  status.className='item-status';
+  Object.keys(STATUSES).forEach(k=>{
+    const o = document.createElement('option'); o.value=k; o.textContent=STATUSES[k];
+    if(k===(item.status||'prog')) o.selected=true;
+    status.appendChild(o);
+  });
   const del = document.createElement('button');
   del.type='button'; del.className='btn icon'; del.textContent='✕';
   del.onclick = ()=> row.remove();
-  row.appendChild(who); row.appendChild(text); row.appendChild(del);
+  row.appendChild(who); row.appendChild(text); row.appendChild(status); row.appendChild(del);
   return row;
 }
 function getItemsFromForm(){
   return Array.from(document.querySelectorAll('#fItems .item-row'))
-    .map(r=>({ text: r.querySelector('.item-text').value.trim(), assignee: r.querySelector('.item-assignee').value }))
+    .map(r=>({
+      text: r.querySelector('.item-text').value.trim(),
+      assignee: r.querySelector('.item-assignee').value,
+      status: r.querySelector('.item-status').value
+    }))
     .filter(it=>it.text);
 }
 function getSelectedAssignees(){
