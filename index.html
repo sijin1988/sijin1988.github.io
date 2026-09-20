@@ -348,12 +348,12 @@ function importBackup(file){
     try{
       const parsed = JSON.parse(reader.result);
       if(!parsed || !Array.isArray(parsed.tasks)) throw new Error('형식이 올바르지 않습니다.');
-      showConfirm('현재 화면의 내용을 이 백업 파일 내용으로 덮어쓸까요?', ()=>{
+      showConfirm('현재 화면의 내용을 이 백업 파일 내용으로 덮어쓸까요?', async ()=>{
         data = parsed;
         if(!data.people) data.people=[]; if(!data.periodOrder) data.periodOrder={};
-        scheduleSave();
+        setStatus('저장 중…');
+        await saveData(false);
         renderCurrentTab();
-        setStatus('백업 파일을 불러왔습니다.');
       });
     }catch(e){
       console.error(e);
