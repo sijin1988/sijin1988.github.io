@@ -395,6 +395,7 @@ function passesFilter(t){
 }
 
 function fmtDate(d){ if(!d) return ''; const dt=new Date(d+'T00:00:00'); return `${dt.getMonth()+1}/${dt.getDate()}`; }
+function monthLabelFromDate(d){ const dt=new Date(d+'T00:00:00'); return `${dt.getFullYear()}년 ${dt.getMonth()+1}월`; }
 function toISODate(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 
 // ---------------- Overall view ----------------
@@ -419,7 +420,7 @@ function renderOverall(){
 
   const groups = {};
   data.tasks.filter(passesFilter).filter(t=>t.track!=='leave').filter(t=> hideDoneOverall ? t.status!=='done' : true).forEach(t=>{
-    const key = t.period || '기간 미지정';
+    const key = t.period || (t.start ? monthLabelFromDate(t.start) : '기간 미지정');
     (groups[key] = groups[key] || []).push(t);
   });
   const keys = Object.keys(groups).sort((a,b)=> periodOrderVal(a)-periodOrderVal(b));
