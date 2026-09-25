@@ -58,6 +58,7 @@
   .chip{display:inline-flex;align-items:center;gap:5px;background:var(--surface-alt);border:1px solid var(--line);border-radius:14px;padding:3px 10px;font-size:12.5px;}
   .chip button{border:none;background:none;color:var(--ink-soft);cursor:pointer;font-size:13px;padding:0;line-height:1;}
 
+  .list-scroll{max-height:65vh;overflow-y:auto;padding-right:2px;}
   .period-group{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:12px;overflow:hidden;}
   .period-head{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--surface-alt);border-bottom:1px solid var(--line);}
   .period-head .label{font-weight:700;font-size:13.5px;color:var(--navy-deep);}
@@ -249,6 +250,7 @@ let editingId = null;
 let saveTimer = null;
 let currentTab = 'overall';
 let calMonth = new Date(); calMonth.setDate(1);
+let hideDoneOverall = false;
 
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function setStatus(t){ document.getElementById('statusLabel').textContent = t; }
@@ -402,22 +404,34 @@ function renderOverall(){
 
   host.appendChild(renderCalendarView());
 
+  const listHead = document.createElement('div');
+  listHead.style.cssText='display:flex;align-items:center;gap:10px;margin:18px 2px 8px;flex-wrap:wrap;';
   const listTitle = document.createElement('div');
-  listTitle.style.cssText='font-size:13px;font-weight:600;color:var(--ink-soft);margin:18px 2px 8px;';
+  listTitle.style.cssText='font-size:13px;font-weight:600;color:var(--ink-soft);';
   listTitle.textContent = '검증 목록';
-  host.appendChild(listTitle);
+  listHead.appendChild(listTitle);
+  const hideDoneWrap = document.createElement('label');
+  hideDoneWrap.style.cssText='display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;';
+  hideDoneWrap.innerHTML = `<input type="checkbox" id="hideDoneOverallChk"${hideDoneOverall?' checked':''}> 완료 항목 숨기기`;
+  hideDoneWrap.querySelector('input').onchange = (e)=>{ hideDoneOverall = e.target.checked; renderOverall(); };
+  listHead.appendChild(hideDoneWrap);
+  host.appendChild(listHead);
 
   const groups = {};
-  data.tasks.filter(passesFilter).filter(t=>t.track!=='leave').forEach(t=>{
+  data.tasks.filter(passesFilter).filter(t=>t.track!=='leave').filter(t=> hideDoneOverall ? t.status!=='done' : true).forEach(t=>{
     const key = t.period || '기간 미지정';
     (groups[key] = groups[key] || []).push(t);
   });
   const keys = Object.keys(groups).sort((a,b)=> periodOrderVal(a)-periodOrderVal(b));
 
+  const listScroll = document.createElement('div');
+  listScroll.className = 'list-scroll';
+  host.appendChild(listScroll);
+
   if(keys.length===0){
     const p = document.createElement('div');
     p.className='empty'; p.textContent='조건에 맞는 작업이 없습니다.';
-    host.appendChild(p); return;
+    listScroll.appendChild(p); return;
   }
 
   keys.forEach((key, idx)=>{
@@ -438,7 +452,7 @@ function renderOverall(){
     groups[key].sort((a,b)=>(a.start||'').localeCompare(b.start||'')).forEach(t=>{
       group.appendChild(renderTaskRow(t));
     });
-    host.appendChild(group);
+    listScroll.appendChild(group);
   });
 }
 function swapPeriodOrder(a,b){
