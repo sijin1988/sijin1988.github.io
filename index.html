@@ -24,7 +24,7 @@
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Malgun Gothic","Apple SD Gothic Neo","Segoe UI",sans-serif;line-height:1.45;padding:18px 14px 60px;}
-  .wrap{max-width:1080px;margin:0 auto;}
+  .wrap{max-width:min(1500px, 96vw);margin:0 auto;}
   header.top{margin-bottom:14px;}
   header.top h1{font-size:20px;margin:0 0 2px;color:var(--navy-deep);}
   header.top p{margin:0;font-size:12.5px;color:var(--ink-soft);}
@@ -88,7 +88,7 @@
   .cal-nav{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
   .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;}
   .cal-dow{background:var(--surface-alt);text-align:center;font-size:12px;padding:6px 0;color:var(--ink-soft);font-weight:600;}
-  .cal-cell{background:var(--surface);height:120px;padding:4px;box-sizing:border-box;overflow-y:auto;}
+  .cal-cell{background:var(--surface);height:150px;padding:4px;box-sizing:border-box;overflow-y:auto;}
   .cal-cell.out{background:var(--surface-alt);opacity:0.55;}
   .cal-date{font-size:11.5px;color:var(--ink-soft);margin-bottom:2px;}
   .cal-cell.today .cal-date{color:var(--navy);font-weight:700;}
