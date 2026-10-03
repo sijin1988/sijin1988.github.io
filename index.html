@@ -278,7 +278,56 @@ function showConfirm(message, onYes){
 const hasCloudStorage = !!__db;
 const LOCAL_KEY = 'sched:data:local';
 const docRef = hasCloudStorage ? __db.collection('schedule').doc('main') : null;
-let suppressNextSnapshot = false;
+// ---- 동시 편집 병합 (3-way merge) ----
+// base = 내가 마지막으로 본 서버 상태, local = 내 화면 데이터, server = 지금 서버 데이터
+// 내가 바꾼 항목만 서버 최신 데이터에 합치고, 남이 추가/수정한 항목은 그대로 둔다.
+function _stable(v){
+  if(Array.isArray(v)) return '['+v.map(_stable).join(',')+']';
+  if(v && typeof v==='object') return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+_stable(v[k])).join(',')+'}';
+  return JSON.stringify(v===undefined?null:v);
+}
+const _clone = v => JSON.parse(JSON.stringify(v));
+const _same = (a,b) => _stable(a)===_stable(b);
+function mergeById(base, local, server){
+  const bm=new Map((base||[]).map(x=>[x.id,x])), lm=new Map((local||[]).map(x=>[x.id,x]));
+  const out=[], used=new Set();
+  for(const s of (server||[])){
+    used.add(s.id);
+    const inB=bm.has(s.id), inL=lm.has(s.id);
+    if(inB && !inL) continue;                                              // 내가 삭제함
+    if(inL && (!inB || !_same(lm.get(s.id), bm.get(s.id)))) out.push(lm.get(s.id)); // 내가 수정함
+    else out.push(s);                                                      // 내가 안 건드림 → 서버 최신본
+  }
+  for(const l of (local||[])){
+    if(used.has(l.id)) continue;
+    if(!bm.has(l.id)) out.push(l);                                         // 내가 새로 추가함
+    else if(!_same(l, bm.get(l.id))) out.push(l);                          // 남이 지웠지만 내가 수정함 → 내 수정 유지
+    // 남이 지웠고 나는 안 건드림 → 삭제 유지
+  }
+  return out;
+}
+function mergeMap(base, local, server){
+  const out={...(server||{})}, b=base||{}, l=local||{};
+  for(const k of Object.keys(l)){ if(!(k in b) || !_same(l[k], b[k])) out[k]=l[k]; }
+  for(const k of Object.keys(b)){ if(!(k in l)) delete out[k]; }
+  return out;
+}
+function normalizeData(d){
+  d = d || {};
+  if(!Array.isArray(d.tasks)) d.tasks=[]; if(!Array.isArray(d.people)) d.people=[]; if(!d.periodOrder) d.periodOrder={};
+  return d;
+}
+function mergeData(base, local, server){
+  base=normalizeData(base); local=normalizeData(local); server=normalizeData(server);
+  const out={...server};
+  out.tasks=mergeById(base.tasks, local.tasks, server.tasks);
+  out.people=mergeById(base.people, local.people, server.people);
+  out.periodOrder=mergeMap(base.periodOrder, local.periodOrder, server.periodOrder);
+  return out;
+}
+let baseData = { tasks: [], people: [], periodOrder: {} }; // 마지막으로 확인한 서버 상태
+let saving = false, saveAgain = false;
+
 // 서버에서 데이터를 "성공적으로" 읽었는지, 문서가 실제로 존재하는지 구분한다.
 // 읽기에 실패한 상태에서는 절대 저장(덮어쓰기)하지 않는다.
 let loadOk = false;
@@ -303,20 +352,23 @@ async function loadData(){
   }
   if(!data.tasks) data.tasks=[]; if(!data.people) data.people=[]; if(!data.periodOrder) data.periodOrder={};
   lastKnownTaskCount = data.tasks.length;
+  baseData = _clone(data);
 }
 function watchRemoteChanges(){
   if(!hasCloudStorage) return;
   docRef.onSnapshot(snap=>{
     if(!snap.exists) return;
-    if(suppressNextSnapshot){ suppressNextSnapshot=false; return; } // this was our own write echoing back
-    data = snap.data();
-    if(!data.tasks) data.tasks=[]; if(!data.people) data.people=[]; if(!data.periodOrder) data.periodOrder={};
+    const server = normalizeData(snap.data());
+    if(_same(server, baseData)) return;                 // 변화 없음 (내 저장이 되돌아온 경우 포함)
+    // 내 화면에 아직 저장 전 편집이 있으면 버리지 않고 서버 최신본에 합친다
+    data = _same(data, baseData) ? _clone(server) : mergeData(baseData, data, server);
+    baseData = _clone(server);
     lastKnownTaskCount = data.tasks.length;
     renderCurrentTab();
     setStatus('다른 사람의 변경사항을 반영했어요 · '+new Date().toLocaleTimeString('ko-KR'));
   }, err=>{ console.error('실시간 동기화 오류', err); });
 }
-async function saveData(isRetry){
+async function saveData(isRetry, force){
   if(!hasCloudStorage){
     try{
       localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
@@ -333,21 +385,37 @@ async function saveData(isRetry){
     return;
   }
   // 기존에 있던 일정이 전부 사라지는 저장은 확인 없이 하지 않는다
-  if(data.tasks.length===0 && lastKnownTaskCount>0 && !allowEmptySave){
+  if(!force && data.tasks.length===0 && lastKnownTaskCount>0 && !allowEmptySave){
     setStatus('모든 작업이 삭제되는 저장은 막았어요. 새로고침 후 다시 시도해주세요.');
     return;
   }
+  // 저장이 진행 중이면 끝난 뒤 한 번 더 저장한다 (저장 중 생긴 편집 보존)
+  if(saving){ saveAgain = true; return; }
+  saving = true;
+  const sent = _clone(data), sentBase = _clone(baseData);
   try{
-    suppressNextSnapshot = true;
     // 저장 전에 시간별 백업을 남긴다 (규칙이 허용하지 않으면 조용히 건너뜀)
     try{
       const d = new Date(), p = n=>String(n).padStart(2,'0');
       const id = `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}`;
-      __db.collection('schedule_backups').doc(id).set({savedAt:new Date().toISOString(), data:JSON.parse(JSON.stringify(data))}).catch(()=>{});
+      __db.collection('schedule_backups').doc(id).set({savedAt:new Date().toISOString(), data:sent}).catch(()=>{});
     }catch(_){}
-    await docRef.set(data);
+    // 트랜잭션: 저장하는 순간의 서버 최신 데이터를 읽어, 내가 바꾼 항목만 합쳐서 쓴다.
+    // (다른 사람이 그 사이에 저장했으면 자동으로 다시 시도됨)
+    const merged = await __db.runTransaction(async tx=>{
+      const s = await tx.get(docRef);
+      const server = normalizeData(s.exists ? s.data() : {});
+      const m = (force || !s.exists) ? sent : mergeData(sentBase, sent, server);
+      tx.set(docRef, m);
+      return m;
+    });
+    baseData = _clone(merged);
+    // 남의 변경이 합쳐졌거나 저장 중 새 편집이 있었다면 화면 데이터에 반영
+    const before = _stable(data);
+    data = mergeData(sent, data, merged);
     lastKnownTaskCount = data.tasks.length;
     allowEmptySave = false;
+    if(_stable(data)!==before) renderCurrentTab();
     setStatus('저장됨 · '+new Date().toLocaleTimeString('ko-KR'));
     document.getElementById('retrySaveBtn').style.display = 'none';
   }catch(e){
@@ -359,6 +427,9 @@ async function saveData(isRetry){
       setStatus('저장 실패 — 지금 화면의 내용은 남아있지만 서버에는 아직 저장되지 않았어요.');
       document.getElementById('retrySaveBtn').style.display = 'inline-block';
     }
+  }finally{
+    saving = false;
+    if(saveAgain){ saveAgain = false; saveData(false); }
   }
 }
 document.getElementById('retrySaveBtn').onclick = ()=> saveData();
@@ -386,7 +457,8 @@ function importBackup(file){
         allowEmptySave = true;
         if(!data.people) data.people=[]; if(!data.periodOrder) data.periodOrder={};
         setStatus('저장 중…');
-        await saveData(false);
+        await saveData(false, true); // 백업 불러오기는 병합하지 않고 파일 내용으로 덮어쓴다 (확인창에서 동의함)
+        baseData = _clone(data);
         renderCurrentTab();
       });
     }catch(e){
