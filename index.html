@@ -279,20 +279,30 @@ const hasCloudStorage = !!__db;
 const LOCAL_KEY = 'sched:data:local';
 const docRef = hasCloudStorage ? __db.collection('schedule').doc('main') : null;
 let suppressNextSnapshot = false;
+// 서버에서 데이터를 "성공적으로" 읽었는지, 문서가 실제로 존재하는지 구분한다.
+// 읽기에 실패한 상태에서는 절대 저장(덮어쓰기)하지 않는다.
+let loadOk = false;
+let docExists = false;
+let lastKnownTaskCount = 0;
+let allowEmptySave = false; // 사용자가 직접 마지막 작업을 삭제/백업 복원하는 경우에만 true로 잠깐 켠다
 
 async function loadData(){
   if(hasCloudStorage){
     try{
-      const snap = await docRef.get();
+      const snap = await docRef.get({source:'server'});
+      loadOk = true;
+      docExists = snap.exists;
       if(snap.exists) data = snap.data();
-    }catch(e){ console.error(e); /* first run, or offline */ }
+    }catch(e){ console.error(e); loadOk = false; }
   }else{
+    loadOk = true;
     try{
       const raw = localStorage.getItem(LOCAL_KEY);
       if(raw) data = JSON.parse(raw);
     }catch(e){ /* nothing stored yet */ }
   }
   if(!data.tasks) data.tasks=[]; if(!data.people) data.people=[]; if(!data.periodOrder) data.periodOrder={};
+  lastKnownTaskCount = data.tasks.length;
 }
 function watchRemoteChanges(){
   if(!hasCloudStorage) return;
@@ -301,6 +311,7 @@ function watchRemoteChanges(){
     if(suppressNextSnapshot){ suppressNextSnapshot=false; return; } // this was our own write echoing back
     data = snap.data();
     if(!data.tasks) data.tasks=[]; if(!data.people) data.people=[]; if(!data.periodOrder) data.periodOrder={};
+    lastKnownTaskCount = data.tasks.length;
     renderCurrentTab();
     setStatus('다른 사람의 변경사항을 반영했어요 · '+new Date().toLocaleTimeString('ko-KR'));
   }, err=>{ console.error('실시간 동기화 오류', err); });
@@ -316,9 +327,27 @@ async function saveData(isRetry){
     }
     return;
   }
+  // 서버 읽기에 실패한 상태의 화면 데이터로는 저장하지 않는다 (데이터 유실 방지)
+  if(!loadOk){
+    setStatus('서버에서 데이터를 불러오지 못해 저장을 막았어요. 새로고침 후 다시 시도해주세요.');
+    return;
+  }
+  // 기존에 있던 일정이 전부 사라지는 저장은 확인 없이 하지 않는다
+  if(data.tasks.length===0 && lastKnownTaskCount>0 && !allowEmptySave){
+    setStatus('모든 작업이 삭제되는 저장은 막았어요. 새로고침 후 다시 시도해주세요.');
+    return;
+  }
   try{
     suppressNextSnapshot = true;
+    // 저장 전에 시간별 백업을 남긴다 (규칙이 허용하지 않으면 조용히 건너뜀)
+    try{
+      const d = new Date(), p = n=>String(n).padStart(2,'0');
+      const id = `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}`;
+      __db.collection('schedule_backups').doc(id).set({savedAt:new Date().toISOString(), data:JSON.parse(JSON.stringify(data))}).catch(()=>{});
+    }catch(_){}
     await docRef.set(data);
+    lastKnownTaskCount = data.tasks.length;
+    allowEmptySave = false;
     setStatus('저장됨 · '+new Date().toLocaleTimeString('ko-KR'));
     document.getElementById('retrySaveBtn').style.display = 'none';
   }catch(e){
@@ -354,6 +383,7 @@ function importBackup(file){
       if(!parsed || !Array.isArray(parsed.tasks)) throw new Error('형식이 올바르지 않습니다.');
       showConfirm('현재 화면의 내용을 이 백업 파일 내용으로 덮어쓸까요?', async ()=>{
         data = parsed;
+        allowEmptySave = true;
         if(!data.people) data.people=[]; if(!data.periodOrder) data.periodOrder={};
         setStatus('저장 중…');
         await saveData(false);
@@ -769,6 +799,7 @@ document.getElementById('deleteTaskBtn').onclick = ()=>{
   const idToDelete = editingId;
   showConfirm('이 작업을 삭제할까요?', ()=>{
     data.tasks = data.tasks.filter(t=>t.id!==idToDelete);
+    allowEmptySave = true; // 사용자가 직접 삭제한 경우의 빈 저장은 허용
     scheduleSave(); closeModal(); renderCurrentTab();
   });
 };
@@ -809,7 +840,23 @@ document.getElementById('importFile').onchange = (e)=>{
   setStatus('불러오는 중…');
   if(!hasCloudStorage) document.getElementById('fallbackNotice').style.display = 'block';
   await loadData();
-  if(data.tasks.length===0 && data.people.length===0){
+  if(hasCloudStorage && !loadOk){
+    // 읽기 실패: 예시 데이터를 만들거나 저장하지 않고, 5초마다 다시 불러온다
+    document.getElementById('fallbackNotice').style.display = 'block';
+    setStatus('서버에서 데이터를 불러오지 못했어요. 다시 시도 중… (이 동안 저장은 막혀 있어요)');
+    const retry = setInterval(async ()=>{
+      await loadData();
+      if(loadOk){
+        clearInterval(retry);
+        document.getElementById('fallbackNotice').style.display = 'none';
+        renderOverall(); setStatus('준비 완료'); watchRemoteChanges();
+      }
+    }, 5000);
+    renderOverall();
+    return;
+  }
+  // 서버 문서가 "정말로 없을 때"(최초 실행)만 예시 데이터를 만든다
+  if(data.tasks.length===0 && data.people.length===0 && (!hasCloudStorage || !docExists)){
     // seed with a couple of example rows so the layout isn't empty on first run
     ensurePerson('담당자A');
     data.tasks.push({id:uid(), title:'예시 작업 — 여기를 눌러 수정하거나 삭제하세요', track:'etc', status:'plan', period:'예시 기간', start:'', end:'', note:'', assignees:['담당자A']});
