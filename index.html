@@ -315,6 +315,7 @@ function mergeMap(base, local, server){
 function normalizeData(d){
   d = d || {};
   if(!Array.isArray(d.tasks)) d.tasks=[]; if(!Array.isArray(d.people)) d.people=[]; if(!d.periodOrder) d.periodOrder={};
+  if(!d.weeklyDuty) d.weeklyDuty={};
   return d;
 }
 function mergeData(base, local, server){
@@ -323,6 +324,7 @@ function mergeData(base, local, server){
   out.tasks=mergeById(base.tasks, local.tasks, server.tasks);
   out.people=mergeById(base.people, local.people, server.people);
   out.periodOrder=mergeMap(base.periodOrder, local.periodOrder, server.periodOrder);
+  out.weeklyDuty=mergeMap(base.weeklyDuty, local.weeklyDuty, server.weeklyDuty); // 코끼리 에어컨 주간 담당자
   return out;
 }
 let baseData = { tasks: [], people: [], periodOrder: {} }; // 마지막으로 확인한 서버 상태
@@ -351,6 +353,7 @@ async function loadData(){
     }catch(e){ /* nothing stored yet */ }
   }
   if(!data.tasks) data.tasks=[]; if(!data.people) data.people=[]; if(!data.periodOrder) data.periodOrder={};
+  if(!data.weeklyDuty) data.weeklyDuty={};
   lastKnownTaskCount = data.tasks.length;
   baseData = _clone(data);
 }
@@ -456,6 +459,7 @@ function importBackup(file){
         data = parsed;
         allowEmptySave = true;
         if(!data.people) data.people=[]; if(!data.periodOrder) data.periodOrder={};
+        if(!data.weeklyDuty) data.weeklyDuty={};
         setStatus('저장 중…');
         await saveData(false, true); // 백업 불러오기는 병합하지 않고 파일 내용으로 덮어쓴다 (확인창에서 동의함)
         baseData = _clone(data);
@@ -508,6 +512,7 @@ function renderOverall(){
   host.innerHTML = '';
 
   host.appendChild(renderCalendarView());
+  host.appendChild(renderElephantDuty());
 
   const listHead = document.createElement('div');
   listHead.style.cssText='display:flex;align-items:center;gap:10px;margin:18px 2px 8px;flex-wrap:wrap;';
@@ -615,7 +620,10 @@ function renderCalendarView(){
   const tasks = data.tasks.filter(passesFilter);
   const dated = tasks.filter(t=>t.start);
 
-  for(let i=0;i<42;i++){
+  // 그 달에 필요한 주 수만 그린다 (다음 달 날짜만 있는 줄은 만들지 않음)
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const cellCount = Math.ceil((startDow + daysInMonth) / 7) * 7;
+  for(let i=0;i<cellCount;i++){
     const d = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate()+i);
     const dateStr = toISODate(d);
     const cell = document.createElement('div');
@@ -639,6 +647,68 @@ function renderCalendarView(){
   }
   wrap.appendChild(grid);
   return wrap;
+}
+
+// ---------------- 코끼리 에어컨 주간 담당자 (월~금, 주당 1명) ----------------
+// data.weeklyDuty = { '그 주 월요일 날짜(YYYY-MM-DD)': '담당자 이름' }
+function mondayOf(d){
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - ((x.getDay()+6)%7));
+  return x;
+}
+function renderElephantDuty(){
+  const box = document.createElement('div');
+  box.className = 'timeline-wrap';
+  box.style.marginTop = '14px';
+
+  const year = calMonth.getFullYear(), month = calMonth.getMonth();
+  const first = new Date(year, month, 1), last = new Date(year, month+1, 0);
+
+  const head = document.createElement('div');
+  head.style.cssText = 'font-weight:700;font-size:14px;color:var(--navy-deep);margin-bottom:8px;';
+  head.textContent = `코끼리 에어컨 담당자 · ${year}년 ${month+1}월 (월~금, 주 단위)`;
+  box.appendChild(head);
+
+  const names = allPeopleNames();
+  const thisMon = toISODate(mondayOf(new Date()));
+  const list = document.createElement('div');
+  list.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+
+  let mon = mondayOf(first);
+  while(mon <= last){
+    const fri = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate()+4);
+    if(fri >= first){ // 월~금이 이 달과 겹치는 주만 표시
+      const key = toISODate(mon);
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:'+(key===thisMon?'var(--surface-alt)':'var(--surface)')+';';
+      const label = document.createElement('div');
+      label.style.cssText = 'flex:1;font-size:13px;color:var(--ink);';
+      label.textContent = `${mon.getMonth()+1}/${mon.getDate()}(월) ~ ${fri.getMonth()+1}/${fri.getDate()}(금)` + (key===thisMon ? '  · 이번 주' : '');
+      row.appendChild(label);
+
+      const sel = document.createElement('select');
+      sel.style.cssText = 'min-width:140px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:var(--surface);color:var(--ink);';
+      const cur = (data.weeklyDuty||{})[key] || '';
+      const opts = [''].concat(names);
+      if(cur && !names.includes(cur)) opts.push(cur); // 인력 목록에서 빠진 이름도 기존 선택은 유지
+      opts.forEach(n=>{
+        const o = document.createElement('option');
+        o.value = n; o.textContent = n || '미지정';
+        if(n===cur) o.selected = true;
+        sel.appendChild(o);
+      });
+      sel.onchange = ()=>{
+        if(!data.weeklyDuty) data.weeklyDuty = {};
+        if(sel.value) data.weeklyDuty[key] = sel.value; else delete data.weeklyDuty[key];
+        scheduleSave();
+      };
+      row.appendChild(sel);
+      list.appendChild(row);
+    }
+    mon = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate()+7);
+  }
+  box.appendChild(list);
+  return box;
 }
 
 // ---------------- Person view ----------------
