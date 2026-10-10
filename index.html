@@ -252,7 +252,7 @@ let editingId = null;
 let saveTimer = null;
 let currentTab = 'overall';
 let calMonth = new Date(); calMonth.setDate(1);
-let hideDoneOverall = false;
+let hideDoneOverall = true; // 검증 목록: 완료 항목 숨기기 기본 체크
 
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function setStatus(t){ document.getElementById('statusLabel').textContent = t; }
