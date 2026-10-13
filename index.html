@@ -103,6 +103,21 @@
   .person-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:12px;}
   .person-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;}
   .person-card .pname{font-weight:700;font-size:14.5px;color:var(--navy-deep);}
+  .person-card .pname:hover{text-decoration:underline;}
+  .modal.pp-box{max-width:min(1100px,96vw);padding:20px 24px;}
+  .pp-head{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;}
+  .pp-head h3{font-size:18px;color:var(--navy-deep);}
+  .pp-count{font-size:12px;color:var(--ink-soft);}
+  .pp-leave{font-size:12.5px;color:var(--leave-fg);background:var(--leave-bg);border-radius:8px;padding:6px 10px;margin-bottom:10px;cursor:pointer;}
+  .pp-body{max-height:calc(100vh - 220px);overflow-y:auto;}
+  .pp-group{display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:1;background:var(--surface-alt);border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:12px 0 4px;font-size:13px;font-weight:600;color:var(--navy-deep);}
+  .pp-row{display:grid;grid-template-columns:92px 64px minmax(0,1.6fr) minmax(0,1fr) 120px;gap:10px;align-items:start;padding:8px 10px;border-bottom:1px solid var(--line);font-size:13.5px;cursor:pointer;}
+  .pp-row:hover{background:var(--surface-alt);}
+  .pp-title{font-weight:600;color:var(--ink);word-break:break-word;}
+  .pp-note{font-weight:400;font-size:12px;color:var(--ink-soft);margin-top:2px;}
+  .pp-parent{font-size:12.5px;color:var(--ink-soft);word-break:break-word;}
+  .pp-dates{font-size:12.5px;color:var(--ink-soft);text-align:right;white-space:nowrap;}
+  @media(max-width:720px){ .pp-row{grid-template-columns:auto auto 1fr;} .pp-parent,.pp-dates{grid-column:1 / -1;text-align:left;} }
   .person-card .pleave{width:100%;font-size:12px;color:var(--leave-fg);padding:2px 0 8px;}
   .ptask{display:flex;align-items:flex-start;gap:7px;padding:6px 0;border-top:1px dashed var(--line);}
   .ptask:first-of-type{border-top:none;}
@@ -753,6 +768,117 @@ function renderPerson(){
   host.appendChild(board);
   renderPersonBoard();
 }
+// 한 사람에게 배정된 항목 목록 (카드와 팝업이 같이 사용)
+function personEntries(name, hideDone){
+  const entries = [];
+  const leaveTasks = [];
+  data.tasks.filter(passesFilter).forEach(t=>{
+    if(t.track==='leave'){
+      if((t.assignees||[]).includes(name)) leaveTasks.push(t);
+      return;
+    }
+    if(t.items && t.items.length){
+      t.items.filter(it=>it.assignee===name).forEach(it=>{
+        const st = it.status||t.status;
+        if(hideDone && st==='done') return;
+        entries.push({task:t, text: it.text, status: st, isItem:true});
+      });
+    }else if((t.assignees||[]).includes(name)){
+      if(hideDone && t.status==='done') return;
+      entries.push({task:t, text: t.title, status: t.status, isItem:false});
+    }
+  });
+  entries.sort((a,b)=> periodOrderVal(a.task.period||'기간 미지정') - periodOrderVal(b.task.period||'기간 미지정'));
+  leaveTasks.sort((a,b)=>(a.start||'').localeCompare(b.start||''));
+  return {entries, leaveTasks};
+}
+
+// 담당자 이름을 누르면 열리는 넓은 팝업: 그 사람의 전체 항목을 기간별로 크게 보여준다
+function openPersonPopup(name){
+  const old = document.getElementById('personPopup'); if(old) old.remove();
+  let hideDone = window.__hideDone !== false;
+  const ov = document.createElement('div');
+  ov.className = 'overlay'; ov.id = 'personPopup'; ov.style.zIndex = 40; // 작업 수정 창(50)보다 아래
+  const box = document.createElement('div');
+  box.className = 'modal pp-box';
+  ov.appendChild(box);
+  // ESC: 다른 창(작업 수정·확인창)이 화면에 보이는 동안에는 팝업을 닫지 않는다
+  const onKey = (e)=>{
+    if(e.key!=='Escape') return;
+    const otherOpen = [...document.querySelectorAll('.overlay')].some(o=> o.id!=='personPopup' && getComputedStyle(o).display!=='none');
+    if(!otherOpen) close();
+  };
+  const close = ()=>{ ov.remove(); document.removeEventListener('keydown', onKey); };
+  document.addEventListener('keydown', onKey);
+  ov.addEventListener('mousedown', (e)=>{ if(e.target===ov) close(); });
+
+  function draw(){
+    const {entries, leaveTasks} = personEntries(name, hideDone);
+    box.innerHTML = '';
+
+    const head = document.createElement('div');
+    head.className = 'pp-head';
+    head.innerHTML = `<h3 style="margin:0;">${escapeHtml(name)}</h3><span class="pp-count">${entries.length}건</span><div style="flex:1"></div>`;
+    const lab = document.createElement('label');
+    lab.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;';
+    lab.innerHTML = `<input type="checkbox"${hideDone?' checked':''}> 완료 항목 숨기기`;
+    lab.querySelector('input').onchange = (e)=>{ hideDone = e.target.checked; draw(); };
+    head.appendChild(lab);
+    const x = document.createElement('button');
+    x.className = 'btn small'; x.textContent = '닫기 ✕'; x.onclick = close;
+    head.appendChild(x);
+    box.appendChild(head);
+
+    if(leaveTasks.length>0){
+      const lv = document.createElement('div');
+      lv.className = 'pp-leave';
+      lv.innerHTML = leaveTasks.map(t=>{
+        const range = (t.start||t.end) ? `${fmtDate(t.start)}${t.end&&t.end!==t.start?' ~ '+fmtDate(t.end):''} · ` : '';
+        return `<div>${range}${escapeHtml(t.title)}</div>`;
+      }).join('');
+      lv.onclick = ()=>{ close(); openModal(leaveTasks[0]); };
+      box.appendChild(lv);
+    }
+
+    if(entries.length===0){
+      const e = document.createElement('div'); e.className = 'empty'; e.textContent = '해당 없음';
+      box.appendChild(e);
+      return;
+    }
+    // 기간별로 묶어서 표시
+    const groups = [];
+    entries.forEach(en=>{
+      const key = en.task.period || '기간 미지정';
+      let g = groups.find(x=>x.key===key);
+      if(!g){ g = {key, list:[]}; groups.push(g); }
+      g.list.push(en);
+    });
+    const body = document.createElement('div');
+    body.className = 'pp-body';
+    groups.forEach(g=>{
+      const gh = document.createElement('div');
+      gh.className = 'pp-group';
+      gh.innerHTML = `<span>${escapeHtml(g.key)}</span><span class="pp-count">${g.list.length}건</span>`;
+      body.appendChild(gh);
+      g.list.forEach(en=>{
+        const t = en.task;
+        const row = document.createElement('div');
+        row.className = 'pp-row';
+        const dates = (t.start||t.end) ? fmtDate(t.start)+' ~ '+fmtDate(t.end) : '';
+        row.innerHTML = `<span class="badge b-${t.track}">${TRACKS[t.track]}</span>
+          <span class="badge s-${en.status}">${STATUSES[en.status]}</span>
+          <div class="pp-title">${escapeHtml(en.text)}${t.note&&!en.isItem?`<div class="pp-note">${escapeHtml(t.note)}</div>`:''}</div>
+          <div class="pp-parent">${en.isItem?escapeHtml(t.title):''}</div>
+          <div class="pp-dates">${dates}</div>`;
+        row.onclick = ()=>{ close(); openModal(t); };
+        body.appendChild(row);
+      });
+    });
+    box.appendChild(body);
+  }
+  draw();
+  document.body.appendChild(ov);
+}
 function renderPersonBoard(){
   const board = document.getElementById('personBoard');
   if(!board) return;
@@ -766,28 +892,10 @@ function renderPersonBoard(){
   names.forEach(name=>{
     const card = document.createElement('div');
     card.className='person-card';
-    const entries = [];
-    const leaveTasks = [];
-    data.tasks.filter(passesFilter).forEach(t=>{
-      if(t.track==='leave'){
-        if((t.assignees||[]).includes(name)) leaveTasks.push(t);
-        return;
-      }
-      if(t.items && t.items.length){
-        t.items.filter(it=>it.assignee===name).forEach(it=>{
-          const st = it.status||t.status;
-          if(hideDone && st==='done') return;
-          entries.push({task:t, text: it.text, status: st, isItem:true});
-        });
-      }else if((t.assignees||[]).includes(name)){
-        if(hideDone && t.status==='done') return;
-        entries.push({task:t, text: t.title, status: t.status, isItem:false});
-      }
-    });
-    entries.sort((a,b)=> periodOrderVal(a.task.period||'기간 미지정') - periodOrderVal(b.task.period||'기간 미지정'));
-    leaveTasks.sort((a,b)=>(a.start||'').localeCompare(b.start||''));
+    const {entries, leaveTasks} = personEntries(name, hideDone);
 
-    card.innerHTML = `<div class="pname">${name}</div>`;
+    card.innerHTML = `<div class="pname" title="클릭하면 전체 항목을 크게 볼 수 있어요" style="cursor:pointer;">${escapeHtml(name)} <span style="font-size:11px;font-weight:400;color:var(--ink-soft);">· 크게 보기 ⤢</span></div>`;
+    card.querySelector('.pname').onclick = ()=> openPersonPopup(name);
     if(leaveTasks.length>0){
       const leaveLine = document.createElement('div');
       leaveLine.className = 'pleave';
