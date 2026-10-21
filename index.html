@@ -230,8 +230,8 @@
       </div>
       <div class="field"><label>상태</label>
         <select id="fStatus">
-          <option value="plan">예정</option>
-          <option value="prog" selected>진행중</option>
+          <option value="plan" selected>예정</option>
+          <option value="prog">진행중</option>
           <option value="hold">보류</option>
           <option value="fail">FAIL</option>
           <option value="done">완료</option>
@@ -932,7 +932,7 @@ function openModal(task){
   document.getElementById('modalTitle').textContent = task ? '작업 수정' : '새 작업';
   document.getElementById('fTitle').value = task?.title || '';
   document.getElementById('fTrack').value = task?.track || 'vms';
-  document.getElementById('fStatus').value = task?.status || 'prog';
+  document.getElementById('fStatus').value = task?.status || 'plan';
   document.getElementById('fPeriod').value = task?.period || '';
   document.getElementById('fStart').value = task?.start || '';
   document.getElementById('fEnd').value = task?.end || '';
@@ -986,7 +986,7 @@ function makeItemRow(item){
   status.className='item-status';
   Object.keys(STATUSES).forEach(k=>{
     const o = document.createElement('option'); o.value=k; o.textContent=STATUSES[k];
-    if(k===(item.status||'prog')) o.selected=true;
+    if(k===(item.status||'plan')) o.selected=true;
     status.appendChild(o);
   });
   const del = document.createElement('button');
