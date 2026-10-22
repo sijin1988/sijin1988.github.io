@@ -111,8 +111,9 @@
   .pp-leave{font-size:12.5px;color:var(--leave-fg);background:var(--leave-bg);border-radius:8px;padding:6px 10px;margin-bottom:10px;cursor:pointer;}
   .pp-body{max-height:calc(100vh - 220px);overflow-y:auto;}
   .pp-group{display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:1;background:var(--surface-alt);border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:12px 0 4px;font-size:13px;font-weight:600;color:var(--navy-deep);}
-  .pp-row{display:grid;grid-template-columns:92px 64px minmax(0,1.6fr) minmax(0,1fr) 120px;gap:10px;align-items:start;padding:8px 10px;border-bottom:1px solid var(--line);font-size:13.5px;cursor:pointer;}
+  .pp-row{display:grid;grid-template-columns:92px 84px minmax(0,1.6fr) minmax(0,1fr) 120px;gap:10px;align-items:start;padding:8px 10px;border-bottom:1px solid var(--line);font-size:13.5px;cursor:pointer;}
   .pp-row:hover{background:var(--surface-alt);}
+  .pp-status{border:0;cursor:pointer;font-family:inherit;}
   .pp-title{font-weight:600;color:var(--ink);word-break:break-word;}
   .pp-note{font-weight:400;font-size:12px;color:var(--ink-soft);margin-top:2px;}
   .pp-parent{font-size:12.5px;color:var(--ink-soft);word-break:break-word;}
@@ -781,7 +782,7 @@ function personEntries(name, hideDone){
       t.items.filter(it=>it.assignee===name).forEach(it=>{
         const st = it.status||t.status;
         if(hideDone && st==='done') return;
-        entries.push({task:t, text: it.text, status: st, isItem:true});
+        entries.push({task:t, item:it, text: it.text, status: st, isItem:true});
       });
     }else if((t.assignees||[]).includes(name)){
       if(hideDone && t.status==='done') return;
@@ -866,11 +867,22 @@ function openPersonPopup(name){
         row.className = 'pp-row';
         const dates = (t.start||t.end) ? fmtDate(t.start)+' ~ '+fmtDate(t.end) : '';
         row.innerHTML = `<span class="badge b-${t.track}">${TRACKS[t.track]}</span>
-          <span class="badge s-${en.status}">${STATUSES[en.status]}</span>
+          <select class="badge s-${en.status} pp-status" title="상태 변경">${Object.keys(STATUSES).map(k=>`<option value="${k}"${k===en.status?' selected':''}>${STATUSES[k]}</option>`).join('')}</select>
           <div class="pp-title">${escapeHtml(en.text)}${t.note&&!en.isItem?`<div class="pp-note">${escapeHtml(t.note)}</div>`:''}</div>
           <div class="pp-parent">${en.isItem?escapeHtml(t.title):''}</div>
           <div class="pp-dates">${dates}</div>`;
         row.onclick = ()=>{ close(); openModal(t); };
+        // 상태는 이 창에서 바로 변경 (스케줄 화면으로 이동하지 않음)
+        const sel = row.querySelector('.pp-status');
+        sel.onclick = (e)=> e.stopPropagation();
+        sel.onchange = ()=>{
+          if(en.isItem) en.item.status = sel.value; else t.status = sel.value;
+          scheduleSave();
+          renderCurrentTab();
+          const top = box.querySelector('.pp-body')?.scrollTop || 0;
+          draw();
+          const nb = box.querySelector('.pp-body'); if(nb) nb.scrollTop = top;
+        };
         body.appendChild(row);
       });
     });
