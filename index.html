@@ -131,7 +131,7 @@
   .modal h3{margin:0 0 14px;font-size:16px;color:var(--navy-deep);}
   .field{margin-bottom:12px;}
   .field label{display:block;font-size:12.5px;color:var(--ink-soft);margin-bottom:4px;}
-  .field input[type=text], .field input[type=date], .field select, .field textarea{
+  .field input[type=text], .field input[type=date], .field input[type=number], .field select, .field textarea{
     width:100%;border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:13.5px;font-family:inherit;background:var(--surface-alt);
   }
   .field textarea{min-height:56px;resize:vertical;}
@@ -141,6 +141,31 @@
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
 
   .footer-actions{display:flex;justify-content:space-between;align-items:center;margin-top:16px;font-size:12px;color:var(--ink-soft);}
+
+  .muted{color:var(--ink-soft);}
+  .e-QA{background:var(--vms-bg);color:var(--vms-fg);}
+  .e-Staging{background:var(--app-bg);color:var(--app-fg);}
+  .e-Prod{background:var(--mobile-bg);color:var(--mobile-fg);}
+  .sc-personal{background:var(--web-bg);color:var(--web-fg);}
+  .sc-shared{background:var(--etc-bg);color:var(--etc-fg);}
+  .k-long{background:var(--navy);color:#fff;}
+  .k-short{background:var(--leave-bg);color:var(--leave-fg);}
+  .sum-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px;}
+  .sum-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;}
+  .sum-label{font-size:12px;color:var(--ink-soft);}
+  .sum-val{font-size:22px;font-weight:700;color:var(--navy-deep);}
+  .sum-sub{font-size:11.5px;color:var(--ink-soft);}
+  .tbl-wrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow-x:auto;}
+  .tbl{width:100%;border-collapse:collapse;font-size:13px;}
+  .tbl th{background:var(--surface-alt);text-align:left;font-size:12px;color:var(--ink-soft);padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;}
+  .tbl td{padding:8px 10px;border-top:1px solid var(--line);vertical-align:top;}
+  .tbl tbody tr:hover{background:var(--surface-alt);}
+  .tbl .num{text-align:right;white-space:nowrap;}
+  .aging-alert{border-radius:var(--radius);padding:10px 12px;font-size:13px;margin-bottom:12px;}
+  .aging-alert.warn{background:var(--st-fail-bg);color:var(--st-fail-fg);}
+  .aging-alert.ok{background:var(--st-done-bg);color:var(--st-done-fg);}
+  .person-card.need-check{border-color:#E6A5A5;}
+  .tbl tr.need-row td{background:#FFF6F6;}
 </style>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -174,9 +199,11 @@
   <div class="tabs">
     <button id="tabOverall" class="active">전체 일정</button>
     <button id="tabPerson">담당자별</button>
+    <button id="tabSamples">보유시료현황</button>
+    <button id="tabAging">Aging</button>
   </div>
 
-  <div class="toolbar">
+  <div class="toolbar" id="scheduleToolbar">
     <input type="text" id="searchInput" placeholder="제목/메모 검색">
     <select id="trackFilter">
       <option value="">전체 트랙</option>
@@ -201,6 +228,8 @@
 
   <div id="overallView"></div>
   <div id="personView" style="display:none;"></div>
+  <div id="samplesView" style="display:none;"></div>
+  <div id="agingView" style="display:none;"></div>
 
   <div class="footer-actions">
     <div><span id="statusLabel">불러오는 중…</span> <button class="btn small" id="retrySaveBtn" style="display:none;margin-left:6px;">다시 저장</button></div>
@@ -263,7 +292,7 @@
 const TRACKS = {vms:'VMS', mobile:'Mobile', app:'Appliance', web:'WebClient', etc:'공통/기타', leave:'휴가/교육'};
 const STATUSES = {plan:'예정', prog:'진행중', hold:'보류', fail:'FAIL', done:'완료'};
 
-let data = { tasks: [], people: [], periodOrder: {} };
+let data = { tasks: [], people: [], periodOrder: {}, samples: [], aging: [], agingChecks: [] };
 let editingId = null;
 let saveTimer = null;
 let currentTab = 'overall';
@@ -332,6 +361,7 @@ function normalizeData(d){
   d = d || {};
   if(!Array.isArray(d.tasks)) d.tasks=[]; if(!Array.isArray(d.people)) d.people=[]; if(!d.periodOrder) d.periodOrder={};
   if(!d.weeklyDuty) d.weeklyDuty={};
+  if(!Array.isArray(d.samples)) d.samples=[]; if(!Array.isArray(d.aging)) d.aging=[]; if(!Array.isArray(d.agingChecks)) d.agingChecks=[];
   return d;
 }
 function mergeData(base, local, server){
@@ -341,9 +371,12 @@ function mergeData(base, local, server){
   out.people=mergeById(base.people, local.people, server.people);
   out.periodOrder=mergeMap(base.periodOrder, local.periodOrder, server.periodOrder);
   out.weeklyDuty=mergeMap(base.weeklyDuty, local.weeklyDuty, server.weeklyDuty); // 코끼리 에어컨 주간 담당자
+  out.samples=mergeById(base.samples, local.samples, server.samples);             // 보유시료현황
+  out.aging=mergeById(base.aging, local.aging, server.aging);                     // Aging 항목
+  out.agingChecks=mergeById(base.agingChecks, local.agingChecks, server.agingChecks); // Aging 주간 점검 기록
   return out;
 }
-let baseData = { tasks: [], people: [], periodOrder: {} }; // 마지막으로 확인한 서버 상태
+let baseData = { tasks: [], people: [], periodOrder: {}, samples: [], aging: [], agingChecks: [] }; // 마지막으로 확인한 서버 상태
 let saving = false, saveAgain = false;
 
 // 서버에서 데이터를 "성공적으로" 읽었는지, 문서가 실제로 존재하는지 구분한다.
@@ -370,6 +403,7 @@ async function loadData(){
   }
   if(!data.tasks) data.tasks=[]; if(!data.people) data.people=[]; if(!data.periodOrder) data.periodOrder={};
   if(!data.weeklyDuty) data.weeklyDuty={};
+  normalizeData(data);
   lastKnownTaskCount = data.tasks.length;
   baseData = _clone(data);
 }
@@ -476,6 +510,7 @@ function importBackup(file){
         allowEmptySave = true;
         if(!data.people) data.people=[]; if(!data.periodOrder) data.periodOrder={};
         if(!data.weeklyDuty) data.weeklyDuty={};
+        normalizeData(data);
         setStatus('저장 중…');
         await saveData(false, true); // 백업 불러오기는 병합하지 않고 파일 내용으로 덮어쓴다 (확인창에서 동의함)
         baseData = _clone(data);
@@ -1068,24 +1103,461 @@ document.getElementById('deleteTaskBtn').onclick = ()=>{
 
 // ---------------- Tabs & filters ----------------
 function renderCurrentTab(){
-  if(currentTab==='overall'){ renderOverall(); } else { renderPerson(); }
+  (TAB_DEFS[currentTab] || TAB_DEFS.overall).render();
 }
-document.getElementById('tabOverall').onclick = ()=>{
-  currentTab='overall';
-  document.getElementById('tabOverall').classList.add('active');
-  document.getElementById('tabPerson').classList.remove('active');
-  document.getElementById('overallView').style.display='block';
-  document.getElementById('personView').style.display='none';
-  renderOverall();
+// ---------------- 공용 입력 창 (보유시료 / Aging 에서 사용) ----------------
+// fields: {key,label,type:'text|number|date|select|textarea|tags', options:[[value,label]], required, half, showIf(values), hint}
+function openFormModal({title, fields, values, onSave, onDelete, width}){
+  const ov = document.createElement('div');
+  ov.className = 'overlay'; ov.style.zIndex = 60;
+  const box = document.createElement('div');
+  box.className = 'modal'; if(width) box.style.maxWidth = width+'px';
+  box.innerHTML = `<h3></h3><div class="fm-body"></div><div class="fm-error" style="display:none;color:#A6394A;font-size:12.5px;margin-top:6px;"></div><div class="modal-actions"></div>`;
+  box.querySelector('h3').textContent = title;
+  ov.appendChild(box);
+  const body = box.querySelector('.fm-body');
+  const ctrls = {}, wraps = {};
+  let pair = null;
+  fields.forEach(f=>{
+    const wrap = document.createElement('div'); wrap.className = 'field';
+    const lab = document.createElement('label'); lab.textContent = f.label + (f.required ? ' *' : '');
+    wrap.appendChild(lab);
+    let el;
+    if(f.type==='select'){
+      el = document.createElement('select');
+      (typeof f.options==='function' ? f.options() : f.options).forEach(o=>{
+        const op = document.createElement('option'); op.value = o[0]; op.textContent = o[1]; el.appendChild(op);
+      });
+    }else if(f.type==='textarea'){
+      el = document.createElement('textarea');
+    }else{
+      el = document.createElement('input');
+      el.type = (f.type==='tags') ? 'text' : f.type;
+      if(f.type==='number'){ el.step = f.step || 'any'; if(f.min!=null) el.min = f.min; if(f.max!=null) el.max = f.max; }
+    }
+    if(f.placeholder) el.placeholder = f.placeholder;
+    const v = values ? values[f.key] : undefined;
+    if(f.type==='tags') el.value = (v||[]).join(', ');
+    else if(v!=null) el.value = v;
+    else if(f.default!=null) el.value = f.default;
+    el.addEventListener('input', refresh); el.addEventListener('change', refresh);
+    wrap.appendChild(el);
+    if(f.hint){ const h = document.createElement('div'); h.style.cssText='font-size:11.5px;color:var(--ink-soft);margin-top:3px;'; h.textContent = f.hint; wrap.appendChild(h); }
+    ctrls[f.key] = el; wraps[f.key] = wrap;
+    if(f.half){
+      if(!pair){ pair = document.createElement('div'); pair.className = 'two-col'; body.appendChild(pair); }
+      pair.appendChild(wrap);
+      if(pair.children.length===2) pair = null;
+    }else{ pair = null; body.appendChild(wrap); }
+  });
+  function read(){
+    const out = {};
+    fields.forEach(f=>{
+      const el = ctrls[f.key]; let v = el.value;
+      if(f.type==='number') v = (v==='' ? null : Number(v));
+      else if(f.type==='tags') v = v.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
+      else if(typeof v==='string') v = v.trim();
+      out[f.key] = v;
+    });
+    return out;
+  }
+  function refresh(){
+    const vals = read();
+    fields.forEach(f=>{ if(f.showIf) wraps[f.key].style.display = f.showIf(vals) ? '' : 'none'; });
+  }
+  const close = ()=>{ ov.remove(); document.removeEventListener('keydown', onKey, true); };
+  const onKey = (e)=>{ if(e.key==='Escape'){ e.stopPropagation(); close(); } };
+  document.addEventListener('keydown', onKey, true);
+  const actions = box.querySelector('.modal-actions');
+  if(onDelete){
+    const del = document.createElement('button'); del.className = 'btn'; del.textContent = '삭제';
+    del.style.cssText = 'margin-right:auto;color:#A6394A;border-color:#A6394A;';
+    del.onclick = ()=> showConfirm('삭제할까요?', ()=>{ close(); onDelete(); });
+    actions.appendChild(del);
+  }
+  const cancel = document.createElement('button'); cancel.className = 'btn'; cancel.textContent = '취소'; cancel.onclick = close;
+  const save = document.createElement('button'); save.className = 'btn primary'; save.textContent = '저장';
+  save.onclick = ()=>{
+    const vals = read();
+    const err = box.querySelector('.fm-error');
+    for(const f of fields){
+      if(f.showIf && !f.showIf(vals)) continue;
+      const empty = f.type==='tags' ? false : (vals[f.key]===''||vals[f.key]==null||Number.isNaN(vals[f.key]));
+      if(f.required && empty){ err.textContent = f.label+' 항목을 입력해주세요.'; err.style.display = 'block'; return; }
+      if(f.type==='number' && vals[f.key]!=null && ((f.min!=null && vals[f.key]<f.min) || (f.max!=null && vals[f.key]>f.max))){
+        err.textContent = f.label+' 값은 '+f.min+' ~ '+f.max+' 범위로 입력해주세요.'; err.style.display = 'block'; return;
+      }
+    }
+    fields.forEach(f=>{ if(f.showIf && !f.showIf(vals)) vals[f.key] = ''; });
+    close(); onSave(vals);
+  };
+  actions.appendChild(cancel); actions.appendChild(save);
+  document.body.appendChild(ov);
+  refresh();
+  const first = body.querySelector('input,select,textarea'); if(first) first.focus();
+}
+function personOptions(withBlank){
+  const list = allPeopleNames().map(n=>[n,n]);
+  return withBlank ? [['', '전체 담당자'], ...list] : list;
+}
+
+// ---------------- 보유시료현황 ----------------
+const ENVS = {QA:'QA', Staging:'Staging', Prod:'Prod'};
+const SCOPES = {personal:'개인용', shared:'공통용'};
+let sampleFilter = {owner:'', env:'', scope:'', q:''};
+let sampleView = 'table';
+
+function samplesFiltered(){
+  const q = sampleFilter.q.toLowerCase();
+  return data.samples.filter(s=>{
+    if(sampleFilter.owner && s.owner!==sampleFilter.owner) return false;
+    if(sampleFilter.env && s.env!==sampleFilter.env) return false;
+    if(sampleFilter.scope && s.scope!==sampleFilter.scope) return false;
+    if(q && !((s.name||'').toLowerCase().includes(q) || (s.cpu||'').toLowerCase().includes(q) || (s.ip||'').toLowerCase().includes(q) || (s.items||[]).join(' ').toLowerCase().includes(q) || (s.note||'').toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+function sumQty(list){ return list.reduce((a,s)=> a + (Number(s.qty)||0), 0); }
+function sampleChips(s){
+  return (s.items||[]).map(i=>`<span class="chip" style="padding:1px 8px;font-size:11.5px;">${escapeHtml(i)}</span>`).join(' ');
+}
+function openSampleForm(sample){
+  const people = personOptions(false);
+  openFormModal({
+    title: sample ? '보유시료 수정' : '보유시료 추가',
+    values: sample,
+    fields: [
+      {key:'name', label:'시료명', type:'select', options:[['PC','PC'],['Appliance','Appliance']]},
+      {key:'cpu', label:'CPU', type:'text', placeholder:'예: i7-12700', half:true},
+      {key:'ip', label:'서버 IP', type:'text', placeholder:'예: 192.168.0.10', half:true},
+      {key:'qty', label:'시료수', type:'number', required:true, min:0, max:9999, step:1, default:1, half:true},
+      {key:'scope', label:'구분', type:'select', options:Object.entries(SCOPES), half:true},
+      {key:'owner', label:'담당자', type:'select', options:people.length?people:[['','(인력 탭에서 담당자를 먼저 추가)']], half:true},
+      {key:'env', label:'평가환경', type:'select', options:Object.entries(ENVS), half:true},
+      {key:'items', label:'평가항목 (쉼표로 구분)', type:'tags', placeholder:'예: 영상, 녹화, 펌웨어'},
+      {key:'note', label:'비고 (위치, 시리얼 등)', type:'textarea'}
+    ],
+    onSave: v=>{
+      if(v.owner) ensurePerson(v.owner);
+      if(sample) Object.assign(sample, v); else data.samples.push({id:uid(), ...v});
+      scheduleSave(); renderSamples();
+    },
+    onDelete: sample ? ()=>{
+      data.samples = data.samples.filter(s=>s.id!==sample.id);
+      scheduleSave(); renderSamples();
+    } : null
+  });
+}
+function renderSamples(){
+  const host = document.getElementById('samplesView');
+  host.innerHTML = '';
+  const all = data.samples, list = samplesFiltered();
+
+  const sum = document.createElement('div'); sum.className = 'sum-cards';
+  const card = (label, val, sub)=>`<div class="sum-card"><div class="sum-label">${label}</div><div class="sum-val">${val}</div>${sub?`<div class="sum-sub">${sub}</div>`:''}</div>`;
+  sum.innerHTML = card('총 시료수', sumQty(all)+'대', all.length+'건')
+    + Object.keys(ENVS).map(e=>card(e, sumQty(all.filter(s=>s.env===e))+'대')).join('')
+    + card('개인용', sumQty(all.filter(s=>s.scope==='personal'))+'대')
+    + card('공통용', sumQty(all.filter(s=>s.scope==='shared'))+'대');
+  host.appendChild(sum);
+
+  const bar = document.createElement('div'); bar.className = 'toolbar';
+  const opt = (arr, cur)=> arr.map(o=>`<option value="${escapeHtml(o[0])}"${o[0]===cur?' selected':''}>${escapeHtml(o[1])}</option>`).join('');
+  bar.innerHTML = `<input type="text" id="smQ" placeholder="CPU/IP/평가항목/비고 검색" value="${escapeHtml(sampleFilter.q)}">
+    <select id="smOwner">${opt(personOptions(true), sampleFilter.owner)}</select>
+    <select id="smEnv">${opt([['','전체 환경'], ...Object.entries(ENVS)], sampleFilter.env)}</select>
+    <select id="smScope">${opt([['','개인용/공통용'], ...Object.entries(SCOPES)], sampleFilter.scope)}</select>
+    <select id="smView">${opt([['table','표 보기'],['person','담당자별 보기']], sampleView)}</select>
+    <div class="spacer"></div>
+    <button class="btn primary" id="smAdd">+ 시료 추가</button>`;
+  host.appendChild(bar);
+  const q = bar.querySelector('#smQ');
+  q.oninput = ()=>{ sampleFilter.q = q.value; const pos = q.selectionStart; renderSamples(); const nq = document.getElementById('smQ'); nq.focus(); nq.setSelectionRange(pos,pos); };
+  bar.querySelector('#smOwner').onchange = e=>{ sampleFilter.owner = e.target.value; renderSamples(); };
+  bar.querySelector('#smEnv').onchange = e=>{ sampleFilter.env = e.target.value; renderSamples(); };
+  bar.querySelector('#smScope').onchange = e=>{ sampleFilter.scope = e.target.value; renderSamples(); };
+  bar.querySelector('#smView').onchange = e=>{ sampleView = e.target.value; renderSamples(); };
+  bar.querySelector('#smAdd').onclick = ()=> openSampleForm(null);
+
+  if(list.length===0){
+    const e = document.createElement('div'); e.className = 'empty';
+    e.textContent = all.length ? '조건에 맞는 시료가 없습니다.' : '등록된 시료가 없습니다. 오른쪽 위 "+ 시료 추가"로 등록해주세요.';
+    host.appendChild(e); return;
+  }
+  if(sampleView==='person'){
+    const board = document.createElement('div'); board.className = 'person-board';
+    const owners = Array.from(new Set(list.map(s=>s.owner||'(담당자 미지정)')));
+    owners.forEach(o=>{
+      const mine = list.filter(s=>(s.owner||'(담당자 미지정)')===o);
+      const c = document.createElement('div'); c.className = 'person-card';
+      c.innerHTML = `<div class="pname">${escapeHtml(o)} <span style="font-size:11px;font-weight:400;color:var(--ink-soft);">· ${sumQty(mine)}대 / ${mine.length}건</span></div>`;
+      mine.forEach(s=>{
+        const r = document.createElement('div'); r.className = 'ptask'; r.style.cursor = 'pointer';
+        r.innerHTML = `<span class="badge e-${s.env}">${escapeHtml(s.env)}</span>
+          <div><div class="ttl">${escapeHtml(s.name)} <span style="color:var(--ink-soft);font-weight:400;">× ${Number(s.qty)||0}</span> <span class="badge sc-${s.scope}" style="margin-left:2px">${SCOPES[s.scope]||''}</span></div>
+          <div class="meta">${[s.cpu?'CPU '+escapeHtml(s.cpu):'', s.ip?'IP '+escapeHtml(s.ip):''].filter(Boolean).join(' · ')}</div>
+          <div class="meta">${sampleChips(s)}${s.note?' · '+escapeHtml(s.note):''}</div></div>`;
+        r.onclick = ()=> openSampleForm(s);
+        c.appendChild(r);
+      });
+      board.appendChild(c);
+    });
+    host.appendChild(board); return;
+  }
+  const rows = list.slice().sort((a,b)=> (a.owner||'').localeCompare(b.owner||'') || (a.name||'').localeCompare(b.name||''));
+  const wrap = document.createElement('div'); wrap.className = 'tbl-wrap';
+  wrap.innerHTML = `<table class="tbl"><thead><tr><th>시료명</th><th>CPU</th><th>서버 IP</th><th class="num">시료수</th><th>구분</th><th>평가환경</th><th>담당자</th><th>평가항목</th><th>비고</th></tr></thead><tbody></tbody></table>`;
+  const tb = wrap.querySelector('tbody');
+  rows.forEach(s=>{
+    const tr = document.createElement('tr'); tr.style.cursor = 'pointer';
+    tr.innerHTML = `<td><b>${escapeHtml(s.name)}</b></td><td>${escapeHtml(s.cpu||'')}</td><td>${escapeHtml(s.ip||'')}</td><td class="num">${Number(s.qty)||0}</td>
+      <td><span class="badge sc-${s.scope}">${SCOPES[s.scope]||''}</span></td>
+      <td><span class="badge e-${s.env}">${escapeHtml(s.env||'')}</span></td>
+      <td>${escapeHtml(s.owner||'')}</td><td>${sampleChips(s)}</td><td class="muted">${escapeHtml(s.note||'')}</td>`;
+    tr.onclick = ()=> openSampleForm(s);
+    tb.appendChild(tr);
+  });
+  host.appendChild(wrap);
+}
+
+// ---------------- Aging ----------------
+const AGING_KINDS = {long:'장기 Aging', short:'단기 Aging'};
+let agingFilter = {kind:'', env:'', owner:'', activeOnly:true};
+
+function thisMonday(){
+  const d = new Date(); d.setDate(d.getDate() - ((d.getDay()+6)%7));
+  return toISODate(d);
+}
+function daysBetween(fromISO, to){
+  const a = new Date(fromISO+'T00:00:00'), b = new Date(toISODate(to)+'T00:00:00');
+  return Math.round((b-a)/86400000);
+}
+function checksOf(agingId){
+  return data.agingChecks.filter(c=>c.agingId===agingId).sort((a,b)=> b.date.localeCompare(a.date));
+}
+function checkHasFail(c){ return c.live==='fail' || c.timeline==='fail' || c.rec==='fail'; }
+function agingNeedsCheck(a){
+  if(a.active===false) return false;
+  const mon = thisMonday();
+  if(a.start && a.start>mon) return false; // 이번 주 월요일 이후에 시작한 건은 다음 월요일부터 점검
+  return !checksOf(a.id).some(c=>c.date>=mon);
+}
+function agingSampleName(a){
+  const s = a.sampleId && data.samples.find(x=>x.id===a.sampleId);
+  return s ? s.name+(s.ip?' ('+s.ip+')':'') : (a.sampleName ? a.sampleName+' (시료 삭제됨)' : '(시료 미지정)');
+}
+function openAgingForm(aging){
+  const sampleOpts = [['', '(시료 선택)'], ...data.samples.map(s=>[s.id, `${s.name}${s.ip?' ('+s.ip+')':''} · ${s.owner||'담당자 미지정'} · ${s.env}`])];
+  const people = personOptions(false);
+  openFormModal({
+    title: aging ? 'Aging 수정' : 'Aging 추가',
+    values: aging ? {...aging, active: aging.active===false ? 'no' : 'yes'} : null,
+    fields: [
+      {key:'kind', label:'구분', type:'select', options:Object.entries(AGING_KINDS), half:true},
+      {key:'env', label:'평가환경', type:'select', options:Object.entries(ENVS), half:true},
+      {key:'sampleId', label:'대상 시료 (보유시료현황에서 선택)', type:'select', options:sampleOpts, required:true,
+        hint: data.samples.length ? '' : '보유시료현황 탭에서 시료를 먼저 등록해주세요.'},
+      {key:'owner', label:'담당자', type:'select', options:people.length?people:[['','(인력 탭에서 담당자를 먼저 추가)']], half:true},
+      {key:'active', label:'진행 상태', type:'select', options:[['yes','진행중'],['no','종료']], half:true},
+      {key:'start', label:'시작일', type:'date', required:true, half:true},
+      {key:'note', label:'메모', type:'textarea'}
+    ],
+    onSave: v=>{
+      const s = data.samples.find(x=>x.id===v.sampleId);
+      const rec = {kind:v.kind, env:v.env, sampleId:v.sampleId, sampleName: s?s.name:'', owner:v.owner, active: v.active!=='no',
+        start:v.start, note:v.note};
+      if(v.owner) ensurePerson(v.owner);
+      if(aging) Object.assign(aging, rec); else data.aging.push({id:uid(), ...rec});
+      scheduleSave(); renderAging();
+    },
+    onDelete: aging ? ()=>{
+      data.aging = data.aging.filter(a=>a.id!==aging.id);
+      data.agingChecks = data.agingChecks.filter(c=>c.agingId!==aging.id);
+      scheduleSave(); renderAging();
+    } : null
+  });
+}
+function openCheckForm(aging, check, after){
+  const OKFAIL = [['ok','정상'],['fail','FAIL']];
+  const anyFail = v=> v.live==='fail' || v.timeline==='fail' || v.rec==='fail';
+  openFormModal({
+    title: `${agingSampleName(aging)} — ${check?'점검 기록 수정':'점검 기록'}`,
+    values: check || {date: thisMonday()},
+    fields: [
+      {key:'date', label:'점검일', type:'date', required:true},
+      {key:'cpu', label:'CPU (%)', type:'number', required:true, min:0, max:100, half:true},
+      {key:'mem', label:'메모리 (%)', type:'number', required:true, min:0, max:100, half:true},
+      {key:'live', label:'영상확인 · 라이브', type:'select', options:OKFAIL, half:true},
+      {key:'timeline', label:'영상확인 · 타임라인', type:'select', options:OKFAIL, half:true},
+      {key:'rec', label:'영상확인 · 녹화빠짐', type:'select', options:OKFAIL, half:true},
+      {key:'failReason', label:'FAIL 사유', type:'textarea', required:true, showIf:anyFail, placeholder:'어떤 영상에서 어떤 문제가 있었는지 적어주세요'},
+      {key:'note', label:'특이사항', type:'textarea'}
+    ],
+    onSave: v=>{
+      if(check) Object.assign(check, v); else data.agingChecks.push({id:uid(), agingId:aging.id, ...v});
+      scheduleSave(); renderAging(); if(after) after();
+    },
+    onDelete: check ? ()=>{
+      data.agingChecks = data.agingChecks.filter(c=>c.id!==check.id);
+      scheduleSave(); renderAging(); if(after) after();
+    } : null
+  });
+}
+function sparkline(vals, color){
+  if(vals.length<2) return '<span class="muted" style="font-size:11.5px;">기록 2건 이상부터 추이 표시</span>';
+  const W=240, H=44, max=Math.max(100, ...vals), step=W/(vals.length-1);
+  const pts = vals.map((v,i)=>`${(i*step).toFixed(1)},${(H-(v/max)*H).toFixed(1)}`).join(' ');
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:var(--surface-alt);border-radius:6px;"><polyline fill="none" stroke="${color}" stroke-width="2" points="${pts}"/></svg>`;
+}
+function resultPill(v){ return v==='fail' ? '<span class="badge s-fail">FAIL</span>' : '<span class="badge s-done">정상</span>'; }
+function openAgingDetail(aging){
+  const old = document.getElementById('agingDetail'); if(old) old.remove();
+  const ov = document.createElement('div'); ov.className = 'overlay'; ov.id = 'agingDetail'; ov.style.zIndex = 40;
+  const box = document.createElement('div'); box.className = 'modal pp-box'; ov.appendChild(box);
+  const onKey = (e)=>{
+    if(e.key!=='Escape') return;
+    if([...document.querySelectorAll('.overlay')].some(o=>o.id!=='agingDetail' && getComputedStyle(o).display!=='none')) return;
+    close();
+  };
+  const close = ()=>{ ov.remove(); document.removeEventListener('keydown', onKey); };
+  document.addEventListener('keydown', onKey);
+  ov.addEventListener('mousedown', e=>{ if(e.target===ov) close(); });
+  function draw(){
+    const cur = data.aging.find(a=>a.id===aging.id); if(!cur){ close(); return; }
+    const list = checksOf(cur.id);
+    const asc = list.slice().reverse().slice(-12);
+    box.innerHTML = `<div class="pp-head"><h3 style="margin:0;">${escapeHtml(agingSampleName(cur))}</h3>
+      <span class="badge k-${cur.kind}">${AGING_KINDS[cur.kind]}</span><span class="badge e-${cur.env}">${escapeHtml(cur.env)}</span>
+      <span class="pp-count">${escapeHtml(cur.owner||'담당자 미지정')} · 시작 ${escapeHtml(cur.start||'-')}${cur.active===false?' · 종료됨':''}</span>
+      <div style="flex:1"></div><button class="btn primary small" id="adAdd">+ 점검 기록</button><button class="btn small" id="adEdit">Aging 수정</button><button class="btn small" id="adClose">닫기 ✕</button></div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:12px;">
+        <div><div class="muted" style="font-size:12px;margin-bottom:3px;">CPU 추이 (최근 ${asc.length}건)</div>${sparkline(asc.map(c=>Number(c.cpu)||0), '#0C447C')}</div>
+        <div><div class="muted" style="font-size:12px;margin-bottom:3px;">메모리 추이 (최근 ${asc.length}건)</div>${sparkline(asc.map(c=>Number(c.mem)||0), '#854F0B')}</div>
+      </div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>점검일</th><th class="num">CPU</th><th class="num">메모리</th><th>라이브</th><th>타임라인</th><th>녹화빠짐</th><th>FAIL 사유 / 특이사항</th></tr></thead><tbody></tbody></table></div>`;
+    const tb = box.querySelector('tbody');
+    if(list.length===0) tb.innerHTML = '<tr><td colspan="7" class="muted">점검 기록이 없습니다.</td></tr>';
+    list.forEach(c=>{
+      const tr = document.createElement('tr'); tr.style.cursor = 'pointer';
+      const text = [c.failReason?('<b style="color:#791F1F;">'+escapeHtml(c.failReason)+'</b>'):'', escapeHtml(c.note||'')].filter(Boolean).join('<br>');
+      tr.innerHTML = `<td>${escapeHtml(c.date)}</td><td class="num">${c.cpu}%</td><td class="num">${c.mem}%</td><td>${resultPill(c.live)}</td><td>${resultPill(c.timeline)}</td><td>${resultPill(c.rec)}</td><td>${text}</td>`;
+      tr.onclick = ()=> openCheckForm(cur, c, draw);
+      tb.appendChild(tr);
+    });
+    box.querySelector('#adClose').onclick = close;
+    box.querySelector('#adAdd').onclick = ()=> openCheckForm(cur, null, draw);
+    box.querySelector('#adEdit').onclick = ()=> openAgingForm(cur);
+  }
+  draw();
+  document.body.appendChild(ov);
+}
+function showTextPopup(title, text){
+  const ov = document.createElement('div'); ov.className = 'overlay'; ov.style.zIndex = 100;
+  ov.innerHTML = `<div class="modal" style="max-width:520px;"><h3></h3><div class="popup-text" style="white-space:pre-wrap;word-break:break-word;font-size:14px;max-height:60vh;overflow-y:auto;"></div><div class="modal-actions"><button class="btn primary">닫기</button></div></div>`;
+  ov.querySelector('h3').textContent = title;
+  ov.querySelector('.popup-text').textContent = text;
+  const close = ()=>{ ov.remove(); document.removeEventListener('keydown', onKey, true); };
+  const onKey = (e)=>{ if(e.key==='Escape'){ e.stopPropagation(); close(); } };
+  document.addEventListener('keydown', onKey, true);
+  ov.querySelector('button').onclick = close;
+  ov.addEventListener('mousedown', e=>{ if(e.target===ov) close(); });
+  document.body.appendChild(ov);
+}
+function renderAging(){
+  const host = document.getElementById('agingView');
+  host.innerHTML = '';
+  const active = data.aging.filter(a=>a.active!==false);
+  const pending = active.filter(agingNeedsCheck);
+
+  const banner = document.createElement('div');
+  if(pending.length){
+    const byOwner = {};
+    pending.forEach(a=>{ const o = a.owner||'(담당자 미지정)'; byOwner[o] = (byOwner[o]||0)+1; });
+    banner.className = 'aging-alert warn';
+    banner.innerHTML = `<b>이번 주(${fmtDate(thisMonday())} 월요일~) 미점검 ${pending.length}건</b> — ` +
+      Object.entries(byOwner).map(([o,n])=>`<span class="chip" style="padding:1px 9px;">${escapeHtml(o)} ${n}건</span>`).join(' ');
+  }else{
+    banner.className = 'aging-alert ok';
+    banner.textContent = active.length ? `이번 주 점검 완료 (진행중 Aging ${active.length}건)` : '진행중인 Aging이 없습니다.';
+  }
+  host.appendChild(banner);
+
+  const bar = document.createElement('div'); bar.className = 'toolbar';
+  const opt = (arr, cur)=> arr.map(o=>`<option value="${escapeHtml(o[0])}"${o[0]===cur?' selected':''}>${escapeHtml(o[1])}</option>`).join('');
+  bar.innerHTML = `<select id="agKind">${opt([['','장기/단기 전체'], ...Object.entries(AGING_KINDS)], agingFilter.kind)}</select>
+    <select id="agEnv">${opt([['','전체 환경'], ...Object.entries(ENVS)], agingFilter.env)}</select>
+    <select id="agOwner">${opt(personOptions(true), agingFilter.owner)}</select>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);"><input type="checkbox" id="agActive"${agingFilter.activeOnly?' checked':''}> 진행중만 보기</label>
+    <div class="spacer"></div><button class="btn primary" id="agAdd">+ Aging 추가</button>`;
+  host.appendChild(bar);
+  bar.querySelector('#agKind').onchange = e=>{ agingFilter.kind = e.target.value; renderAging(); };
+  bar.querySelector('#agEnv').onchange = e=>{ agingFilter.env = e.target.value; renderAging(); };
+  bar.querySelector('#agOwner').onchange = e=>{ agingFilter.owner = e.target.value; renderAging(); };
+  bar.querySelector('#agActive').onchange = e=>{ agingFilter.activeOnly = e.target.checked; renderAging(); };
+  bar.querySelector('#agAdd').onclick = ()=> openAgingForm(null);
+
+  const list = data.aging.filter(a=>{
+    if(agingFilter.activeOnly && a.active===false) return false;
+    if(agingFilter.kind && a.kind!==agingFilter.kind) return false;
+    if(agingFilter.env && a.env!==agingFilter.env) return false;
+    if(agingFilter.owner && a.owner!==agingFilter.owner) return false;
+    return true;
+  }).sort((a,b)=> (b.kind==='long') - (a.kind==='long') || (a.owner||'').localeCompare(b.owner||''));
+  if(list.length===0){
+    const e = document.createElement('div'); e.className = 'empty';
+    e.textContent = data.aging.length ? '조건에 맞는 Aging이 없습니다.' : '등록된 Aging이 없습니다. 오른쪽 위 "+ Aging 추가"로 등록해주세요.';
+    host.appendChild(e); return;
+  }
+  const wrap = document.createElement('div'); wrap.className = 'tbl-wrap';
+  wrap.innerHTML = `<table class="tbl"><thead><tr><th>구분</th><th>환경</th><th>시료</th><th>담당자</th><th>시작일</th><th class="num">경과</th><th>점검날짜</th><th class="num">CPU</th><th class="num">메모리</th><th>라이브</th><th>타임라인</th><th>녹화빠짐</th><th>판정</th><th>FAIL 사유</th><th></th></tr></thead><tbody></tbody></table>`;
+  const tb = wrap.querySelector('tbody');
+  const today = new Date();
+  const dash = '<span class="muted">-</span>';
+  list.forEach(a=>{
+    const last = checksOf(a.id)[0];
+    const need = agingNeedsCheck(a);
+    const elapsed = a.start ? (Math.max(0, daysBetween(a.start, today))+1)+'일' : '';
+    const tr = document.createElement('tr');
+    if(need) tr.className = 'need-row';
+    tr.innerHTML = `<td><span class="badge k-${a.kind}">${AGING_KINDS[a.kind]}</span></td>
+      <td><span class="badge e-${a.env}">${escapeHtml(a.env)}</span></td>
+      <td><b>${escapeHtml(agingSampleName(a))}</b>${a.active===false?' <span class="badge s-plan">종료</span>':''}</td>
+      <td style="white-space:nowrap;">${escapeHtml(a.owner||'')}</td>
+      <td style="white-space:nowrap;">${escapeHtml(a.start||'')}</td><td class="num">${elapsed}</td>
+      <td style="white-space:nowrap;">${last?escapeHtml(last.date.slice(2).replace(/-/g,'.')):dash}</td>
+      <td class="num">${last?last.cpu+'%':dash}</td><td class="num">${last?last.mem+'%':dash}</td>
+      <td>${last?resultPill(last.live):dash}</td><td>${last?resultPill(last.timeline):dash}</td><td>${last?resultPill(last.rec):dash}</td>
+      <td>${last?(checkHasFail(last)?'<span class="badge s-fail">문제 있음</span>':'<span class="badge s-done">이상 없음</span>'):dash}</td>
+      <td>${last&&checkHasFail(last)&&last.failReason?'<button class="btn small" data-act="reason" style="color:#791F1F;border-color:#E6A5A5;white-space:nowrap;">사유 보기</button>':dash}</td>
+      <td style="white-space:nowrap;"><button class="btn small primary" data-act="add">+ 점검</button> <button class="btn small" data-act="detail">이력</button> <button class="btn small" data-act="edit">수정</button></td>`;
+    const rb = tr.querySelector('[data-act=reason]');
+    if(rb) rb.onclick = ()=> showTextPopup(`${agingSampleName(a)} — FAIL 사유 (${last.date})`, last.failReason);
+    tr.querySelector('[data-act=add]').onclick = ()=> openCheckForm(a, null);
+    tr.querySelector('[data-act=detail]').onclick = ()=> openAgingDetail(a);
+    tr.querySelector('[data-act=edit]').onclick = ()=> openAgingForm(a);
+    tb.appendChild(tr);
+  });
+  host.appendChild(wrap);
+}
+
+// ---------------- 탭 전환 ----------------
+const TAB_DEFS = {
+  overall:{btn:'tabOverall', view:'overallView', render:()=>renderOverall(), toolbar:true},
+  person: {btn:'tabPerson',  view:'personView',  render:()=>renderPerson(),  toolbar:true},
+  samples:{btn:'tabSamples', view:'samplesView', render:()=>renderSamples(), toolbar:false},
+  aging:  {btn:'tabAging',   view:'agingView',   render:()=>renderAging(),   toolbar:false}
 };
-document.getElementById('tabPerson').onclick = ()=>{
-  currentTab='person';
-  document.getElementById('tabPerson').classList.add('active');
-  document.getElementById('tabOverall').classList.remove('active');
-  document.getElementById('personView').style.display='block';
-  document.getElementById('overallView').style.display='none';
-  renderPerson();
-};
+function showTab(name){
+  currentTab = name;
+  Object.entries(TAB_DEFS).forEach(([k,d])=>{
+    document.getElementById(d.btn).classList.toggle('active', k===name);
+    document.getElementById(d.view).style.display = (k===name) ? 'block' : 'none';
+  });
+  document.getElementById('scheduleToolbar').style.display = TAB_DEFS[name].toolbar ? '' : 'none';
+  TAB_DEFS[name].render();
+}
+Object.entries(TAB_DEFS).forEach(([k,d])=>{ document.getElementById(d.btn).onclick = ()=> showTab(k); });
+
 ['searchInput'].forEach(id=>document.getElementById(id).addEventListener('input', renderCurrentTab));
 ['trackFilter','statusFilter'].forEach(id=>document.getElementById(id).addEventListener('change', renderCurrentTab));
 
