@@ -1482,6 +1482,18 @@ function renderAging(){
   }
   host.appendChild(banner);
 
+  // 진행중 Aging 현황 요약
+  const problem = active.filter(x=>{ const l = checksOf(x.id)[0]; return l && checkHasFail(l); });
+  const sumBox = document.createElement('div'); sumBox.className = 'sum-cards';
+  const sc = (label, val, extra)=>`<div class="sum-card"><div class="sum-label">${label}</div><div class="sum-val"${extra||''}>${val}</div></div>`;
+  sumBox.innerHTML = sc('진행중 Aging', active.length+'건')
+    + sc('장기', active.filter(x=>x.kind==='long').length+'건')
+    + sc('단기', active.filter(x=>x.kind==='short').length+'건')
+    + Object.keys(ENVS).map(e=>sc(e, active.filter(x=>x.env===e).length+'건')).join('')
+    + sc('문제 있음', problem.length+'건', problem.length ? ' style="color:#791F1F;"' : '')
+    + sc('미점검', pending.length+'건', pending.length ? ' style="color:#791F1F;"' : '');
+  host.appendChild(sumBox);
+
   const bar = document.createElement('div'); bar.className = 'toolbar';
   const opt = (arr, cur)=> arr.map(o=>`<option value="${escapeHtml(o[0])}"${o[0]===cur?' selected':''}>${escapeHtml(o[1])}</option>`).join('');
   bar.innerHTML = `<select id="agKind">${opt([['','장기/단기 전체'], ...Object.entries(AGING_KINDS)], agingFilter.kind)}</select>
