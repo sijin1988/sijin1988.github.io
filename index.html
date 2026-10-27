@@ -148,8 +148,6 @@
   .e-Prod{background:var(--mobile-bg);color:var(--mobile-fg);}
   .sc-personal{background:var(--web-bg);color:var(--web-fg);}
   .sc-shared{background:var(--etc-bg);color:var(--etc-fg);}
-  .k-long{background:var(--navy);color:#fff;}
-  .k-short{background:var(--leave-bg);color:var(--leave-fg);}
   .sum-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px;}
   .sum-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;}
   .sum-label{font-size:12px;color:var(--ink-soft);}
@@ -171,9 +169,6 @@
   .tbl td{padding:8px 10px;border-top:1px solid var(--line);vertical-align:top;}
   .tbl tbody tr:hover{background:var(--surface-alt);}
   .tbl .num{text-align:right;white-space:nowrap;}
-  .aging-alert{border-radius:var(--radius);padding:10px 12px;font-size:13px;margin-bottom:12px;}
-  .aging-alert.warn{background:var(--st-fail-bg);color:var(--st-fail-fg);}
-  .aging-alert.ok{background:var(--st-done-bg);color:var(--st-done-fg);}
   .person-card.need-check{border-color:#E6A5A5;}
   .tbl tr.need-row td{background:#FFF6F6;}
 </style>
@@ -210,7 +205,6 @@
     <button id="tabOverall" class="active">전체 일정</button>
     <button id="tabPerson">담당자별</button>
     <button id="tabSamples">보유시료현황</button>
-    <button id="tabAging">Aging</button>
     <button id="tabAgingMgmt">Aging관리</button>
   </div>
 
@@ -240,7 +234,6 @@
   <div id="overallView"></div>
   <div id="personView" style="display:none;"></div>
   <div id="samplesView" style="display:none;"></div>
-  <div id="agingView" style="display:none;"></div>
   <div id="agingMgmtView" style="display:none;"></div>
 
   <div class="footer-actions">
@@ -384,8 +377,8 @@ function mergeData(base, local, server){
   out.periodOrder=mergeMap(base.periodOrder, local.periodOrder, server.periodOrder);
   out.weeklyDuty=mergeMap(base.weeklyDuty, local.weeklyDuty, server.weeklyDuty); // 코끼리 에어컨 주간 담당자
   out.samples=mergeById(base.samples, local.samples, server.samples);             // 보유시료현황
-  out.aging=mergeById(base.aging, local.aging, server.aging);                     // Aging 항목
-  out.agingChecks=mergeById(base.agingChecks, local.agingChecks, server.agingChecks); // Aging 주간 점검 기록
+  out.aging=mergeById(base.aging, local.aging, server.aging);                     // (Aging 탭 삭제됨) 기존 저장 데이터 유지용
+  out.agingChecks=mergeById(base.agingChecks, local.agingChecks, server.agingChecks); // (Aging 탭 삭제됨) 기존 저장 데이터 유지용
   return out;
 }
 let baseData = { tasks: [], people: [], periodOrder: {}, samples: [], aging: [], agingChecks: [] }; // 마지막으로 확인한 서버 상태
@@ -1117,7 +1110,7 @@ document.getElementById('deleteTaskBtn').onclick = ()=>{
 function renderCurrentTab(){
   (TAB_DEFS[currentTab] || TAB_DEFS.overall).render();
 }
-// ---------------- 공용 입력 창 (보유시료 / Aging 에서 사용) ----------------
+// ---------------- 공용 입력 창 (보유시료에서 사용) ----------------
 // fields: {key,label,type:'text|number|date|select|textarea|tags', options:[[value,label]], required, half, showIf(values), hint}
 function openFormModal({title, fields, values, onSave, onDelete, width}){
   const ov = document.createElement('div');
@@ -1348,238 +1341,6 @@ function renderSamples(){
   host.appendChild(wrap);
 }
 
-// ---------------- Aging ----------------
-const AGING_KINDS = {long:'장기 Aging', short:'단기 Aging'};
-let agingFilter = {kind:'', env:'', owner:'', activeOnly:true};
-
-function thisMonday(){
-  const d = new Date(); d.setDate(d.getDate() - ((d.getDay()+6)%7));
-  return toISODate(d);
-}
-function daysBetween(fromISO, to){
-  const a = new Date(fromISO+'T00:00:00'), b = new Date(toISODate(to)+'T00:00:00');
-  return Math.round((b-a)/86400000);
-}
-function checksOf(agingId){
-  return data.agingChecks.filter(c=>c.agingId===agingId).sort((a,b)=> b.date.localeCompare(a.date));
-}
-function checkHasFail(c){ return c.live==='fail' || c.timeline==='fail' || c.rec==='fail'; }
-function agingNeedsCheck(a){
-  if(a.active===false) return false;
-  const mon = thisMonday();
-  if(a.start && a.start>mon) return false; // 이번 주 월요일 이후에 시작한 건은 다음 월요일부터 점검
-  return !checksOf(a.id).some(c=>c.date>=mon);
-}
-function agingSampleName(a){
-  const s = a.sampleId && data.samples.find(x=>x.id===a.sampleId);
-  return s ? s.name+(s.ip?' ('+s.ip+')':'') : (a.sampleName ? a.sampleName+' (시료 삭제됨)' : '(시료 미지정)');
-}
-function openAgingForm(aging){
-  const sampleOpts = [['', '(시료 선택)'], ...data.samples.map(s=>[s.id, `${s.name}${s.ip?' ('+s.ip+')':''} · ${s.owner||'담당자 미지정'} · ${s.env}`])];
-  const people = personOptions(false);
-  openFormModal({
-    title: aging ? 'Aging 수정' : 'Aging 추가',
-    values: aging ? {...aging, active: aging.active===false ? 'no' : 'yes'} : null,
-    fields: [
-      {key:'kind', label:'구분', type:'select', options:Object.entries(AGING_KINDS), half:true},
-      {key:'env', label:'평가환경', type:'select', options:Object.entries(ENVS), half:true},
-      {key:'sampleId', label:'대상 시료 (보유시료현황에서 선택)', type:'select', options:sampleOpts, required:true,
-        hint: data.samples.length ? '' : '보유시료현황 탭에서 시료를 먼저 등록해주세요.'},
-      {key:'owner', label:'담당자', type:'select', options:people.length?people:[['','(인력 탭에서 담당자를 먼저 추가)']], half:true},
-      {key:'active', label:'진행 상태', type:'select', options:[['yes','진행중'],['no','종료']], half:true},
-      {key:'start', label:'시작일', type:'date', required:true, half:true},
-      {key:'note', label:'메모', type:'textarea'}
-    ],
-    onSave: v=>{
-      const s = data.samples.find(x=>x.id===v.sampleId);
-      const rec = {kind:v.kind, env:v.env, sampleId:v.sampleId, sampleName: s?s.name:'', owner:v.owner, active: v.active!=='no',
-        start:v.start, note:v.note};
-      if(v.owner) ensurePerson(v.owner);
-      if(aging) Object.assign(aging, rec); else data.aging.push({id:uid(), ...rec});
-      scheduleSave(); renderAging();
-    },
-    onDelete: aging ? ()=>{
-      data.aging = data.aging.filter(a=>a.id!==aging.id);
-      data.agingChecks = data.agingChecks.filter(c=>c.agingId!==aging.id);
-      scheduleSave(); renderAging();
-    } : null
-  });
-}
-function openCheckForm(aging, check, after){
-  const OKFAIL = [['ok','정상'],['fail','FAIL']];
-  const anyFail = v=> v.live==='fail' || v.timeline==='fail' || v.rec==='fail';
-  openFormModal({
-    title: `${agingSampleName(aging)} — ${check?'점검 기록 수정':'점검 기록'}`,
-    values: check || {date: thisMonday()},
-    fields: [
-      {key:'date', label:'점검일', type:'date', required:true},
-      {key:'cpu', label:'CPU (%)', type:'number', required:true, min:0, max:100, half:true},
-      {key:'mem', label:'메모리 (%)', type:'number', required:true, min:0, max:100, half:true},
-      {key:'live', label:'영상확인 · 라이브', type:'select', options:OKFAIL, half:true},
-      {key:'timeline', label:'영상확인 · 타임라인', type:'select', options:OKFAIL, half:true},
-      {key:'rec', label:'영상확인 · 녹화빠짐', type:'select', options:OKFAIL, half:true},
-      {key:'failReason', label:'FAIL 사유', type:'textarea', required:true, showIf:anyFail, placeholder:'어떤 영상에서 어떤 문제가 있었는지 적어주세요'},
-      {key:'note', label:'특이사항', type:'textarea'}
-    ],
-    onSave: v=>{
-      if(check) Object.assign(check, v); else data.agingChecks.push({id:uid(), agingId:aging.id, ...v});
-      scheduleSave(); renderAging(); if(after) after();
-    },
-    onDelete: check ? ()=>{
-      data.agingChecks = data.agingChecks.filter(c=>c.id!==check.id);
-      scheduleSave(); renderAging(); if(after) after();
-    } : null
-  });
-}
-function sparkline(vals, color){
-  if(vals.length<2) return '<span class="muted" style="font-size:11.5px;">기록 2건 이상부터 추이 표시</span>';
-  const W=240, H=44, max=Math.max(100, ...vals), step=W/(vals.length-1);
-  const pts = vals.map((v,i)=>`${(i*step).toFixed(1)},${(H-(v/max)*H).toFixed(1)}`).join(' ');
-  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:var(--surface-alt);border-radius:6px;"><polyline fill="none" stroke="${color}" stroke-width="2" points="${pts}"/></svg>`;
-}
-function resultPill(v){ return v==='fail' ? '<span class="badge s-fail">FAIL</span>' : '<span class="badge s-done">정상</span>'; }
-function openAgingDetail(aging){
-  const old = document.getElementById('agingDetail'); if(old) old.remove();
-  const ov = document.createElement('div'); ov.className = 'overlay'; ov.id = 'agingDetail'; ov.style.zIndex = 40;
-  const box = document.createElement('div'); box.className = 'modal pp-box'; ov.appendChild(box);
-  const onKey = (e)=>{
-    if(e.key!=='Escape') return;
-    if([...document.querySelectorAll('.overlay')].some(o=>o.id!=='agingDetail' && getComputedStyle(o).display!=='none')) return;
-    close();
-  };
-  const close = ()=>{ ov.remove(); document.removeEventListener('keydown', onKey); };
-  document.addEventListener('keydown', onKey);
-  ov.addEventListener('mousedown', e=>{ if(e.target===ov) close(); });
-  function draw(){
-    const cur = data.aging.find(a=>a.id===aging.id); if(!cur){ close(); return; }
-    const list = checksOf(cur.id);
-    const asc = list.slice().reverse().slice(-12);
-    box.innerHTML = `<div class="pp-head"><h3 style="margin:0;">${escapeHtml(agingSampleName(cur))}</h3>
-      <span class="badge k-${cur.kind}">${AGING_KINDS[cur.kind]}</span><span class="badge e-${cur.env}">${escapeHtml(cur.env)}</span>
-      <span class="pp-count">${escapeHtml(cur.owner||'담당자 미지정')} · 시작 ${escapeHtml(cur.start||'-')}${cur.active===false?' · 종료됨':''}</span>
-      <div style="flex:1"></div><button class="btn primary small" id="adAdd">+ 점검 기록</button><button class="btn small" id="adEdit">Aging 수정</button><button class="btn small" id="adClose">닫기 ✕</button></div>
-      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:12px;">
-        <div><div class="muted" style="font-size:12px;margin-bottom:3px;">CPU 추이 (최근 ${asc.length}건)</div>${sparkline(asc.map(c=>Number(c.cpu)||0), '#0C447C')}</div>
-        <div><div class="muted" style="font-size:12px;margin-bottom:3px;">메모리 추이 (최근 ${asc.length}건)</div>${sparkline(asc.map(c=>Number(c.mem)||0), '#854F0B')}</div>
-      </div>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>점검일</th><th class="num">CPU</th><th class="num">메모리</th><th>라이브</th><th>타임라인</th><th>녹화빠짐</th><th>FAIL 사유 / 특이사항</th></tr></thead><tbody></tbody></table></div>`;
-    const tb = box.querySelector('tbody');
-    if(list.length===0) tb.innerHTML = '<tr><td colspan="7" class="muted">점검 기록이 없습니다.</td></tr>';
-    list.forEach(c=>{
-      const tr = document.createElement('tr'); tr.style.cursor = 'pointer';
-      const text = [c.failReason?('<b style="color:#791F1F;">'+escapeHtml(c.failReason)+'</b>'):'', escapeHtml(c.note||'')].filter(Boolean).join('<br>');
-      tr.innerHTML = `<td>${escapeHtml(c.date)}</td><td class="num">${c.cpu}%</td><td class="num">${c.mem}%</td><td>${resultPill(c.live)}</td><td>${resultPill(c.timeline)}</td><td>${resultPill(c.rec)}</td><td>${text}</td>`;
-      tr.onclick = ()=> openCheckForm(cur, c, draw);
-      tb.appendChild(tr);
-    });
-    box.querySelector('#adClose').onclick = close;
-    box.querySelector('#adAdd').onclick = ()=> openCheckForm(cur, null, draw);
-    box.querySelector('#adEdit').onclick = ()=> openAgingForm(cur);
-  }
-  draw();
-  document.body.appendChild(ov);
-}
-function showTextPopup(title, text){
-  const ov = document.createElement('div'); ov.className = 'overlay'; ov.style.zIndex = 100;
-  ov.innerHTML = `<div class="modal" style="max-width:520px;"><h3></h3><div class="popup-text" style="white-space:pre-wrap;word-break:break-word;font-size:14px;max-height:60vh;overflow-y:auto;"></div><div class="modal-actions"><button class="btn primary">닫기</button></div></div>`;
-  ov.querySelector('h3').textContent = title;
-  ov.querySelector('.popup-text').textContent = text;
-  const close = ()=>{ ov.remove(); document.removeEventListener('keydown', onKey, true); };
-  const onKey = (e)=>{ if(e.key==='Escape'){ e.stopPropagation(); close(); } };
-  document.addEventListener('keydown', onKey, true);
-  ov.querySelector('button').onclick = close;
-  ov.addEventListener('mousedown', e=>{ if(e.target===ov) close(); });
-  document.body.appendChild(ov);
-}
-function renderAging(){
-  const host = document.getElementById('agingView');
-  host.innerHTML = '';
-  const active = data.aging.filter(a=>a.active!==false);
-  const pending = active.filter(agingNeedsCheck);
-
-  const banner = document.createElement('div');
-  if(pending.length){
-    const byOwner = {};
-    pending.forEach(a=>{ const o = a.owner||'(담당자 미지정)'; byOwner[o] = (byOwner[o]||0)+1; });
-    banner.className = 'aging-alert warn';
-    banner.innerHTML = `<b>이번 주(${fmtDate(thisMonday())} 월요일~) 미점검 ${pending.length}건</b> — ` +
-      Object.entries(byOwner).map(([o,n])=>`<span class="chip" style="padding:1px 9px;">${escapeHtml(o)} ${n}건</span>`).join(' ');
-  }else{
-    banner.className = 'aging-alert ok';
-    banner.textContent = active.length ? `이번 주 점검 완료 (진행중 Aging ${active.length}건)` : '진행중인 Aging이 없습니다.';
-  }
-  host.appendChild(banner);
-
-  // 진행중 Aging 현황 요약
-  const problem = active.filter(x=>{ const l = checksOf(x.id)[0]; return l && checkHasFail(l); });
-  const sumBox = document.createElement('div'); sumBox.className = 'sum-cards';
-  const sc = (label, val, extra)=>`<div class="sum-card"><div class="sum-label">${label}</div><div class="sum-val"${extra||''}>${val}</div></div>`;
-  sumBox.innerHTML = sc('진행중 Aging', active.length+'건')
-    + sc('장기', active.filter(x=>x.kind==='long').length+'건')
-    + sc('단기', active.filter(x=>x.kind==='short').length+'건')
-    + Object.keys(ENVS).map(e=>sc(e, active.filter(x=>x.env===e).length+'건')).join('')
-    + sc('문제 있음', problem.length+'건', problem.length ? ' style="color:#791F1F;"' : '')
-    + sc('미점검', pending.length+'건', pending.length ? ' style="color:#791F1F;"' : '');
-  host.appendChild(sumBox);
-
-  const bar = document.createElement('div'); bar.className = 'toolbar';
-  const opt = (arr, cur)=> arr.map(o=>`<option value="${escapeHtml(o[0])}"${o[0]===cur?' selected':''}>${escapeHtml(o[1])}</option>`).join('');
-  bar.innerHTML = `<select id="agKind">${opt([['','장기/단기 전체'], ...Object.entries(AGING_KINDS)], agingFilter.kind)}</select>
-    <select id="agEnv">${opt([['','전체 환경'], ...Object.entries(ENVS)], agingFilter.env)}</select>
-    <select id="agOwner">${opt(personOptions(true), agingFilter.owner)}</select>
-    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);"><input type="checkbox" id="agActive"${agingFilter.activeOnly?' checked':''}> 진행중만 보기</label>
-    <div class="spacer"></div><button class="btn primary" id="agAdd">+ Aging 추가</button>`;
-  host.appendChild(bar);
-  bar.querySelector('#agKind').onchange = e=>{ agingFilter.kind = e.target.value; renderAging(); };
-  bar.querySelector('#agEnv').onchange = e=>{ agingFilter.env = e.target.value; renderAging(); };
-  bar.querySelector('#agOwner').onchange = e=>{ agingFilter.owner = e.target.value; renderAging(); };
-  bar.querySelector('#agActive').onchange = e=>{ agingFilter.activeOnly = e.target.checked; renderAging(); };
-  bar.querySelector('#agAdd').onclick = ()=> openAgingForm(null);
-
-  const list = data.aging.filter(a=>{
-    if(agingFilter.activeOnly && a.active===false) return false;
-    if(agingFilter.kind && a.kind!==agingFilter.kind) return false;
-    if(agingFilter.env && a.env!==agingFilter.env) return false;
-    if(agingFilter.owner && a.owner!==agingFilter.owner) return false;
-    return true;
-  }).sort((a,b)=> (b.kind==='long') - (a.kind==='long') || (a.owner||'').localeCompare(b.owner||''));
-  if(list.length===0){
-    const e = document.createElement('div'); e.className = 'empty';
-    e.textContent = data.aging.length ? '조건에 맞는 Aging이 없습니다.' : '등록된 Aging이 없습니다. 오른쪽 위 "+ Aging 추가"로 등록해주세요.';
-    host.appendChild(e); return;
-  }
-  const wrap = document.createElement('div'); wrap.className = 'tbl-wrap';
-  wrap.innerHTML = `<table class="tbl"><thead><tr><th>구분</th><th>환경</th><th>시료</th><th>담당자</th><th>시작일</th><th class="num">경과</th><th>점검날짜</th><th class="num">CPU</th><th class="num">메모리</th><th>라이브</th><th>타임라인</th><th>녹화빠짐</th><th>판정</th><th>FAIL 사유</th><th></th></tr></thead><tbody></tbody></table>`;
-  const tb = wrap.querySelector('tbody');
-  const today = new Date();
-  const dash = '<span class="muted">-</span>';
-  list.forEach(a=>{
-    const last = checksOf(a.id)[0];
-    const need = agingNeedsCheck(a);
-    const elapsed = a.start ? (Math.max(0, daysBetween(a.start, today))+1)+'일' : '';
-    const tr = document.createElement('tr');
-    if(need) tr.className = 'need-row';
-    tr.innerHTML = `<td><span class="badge k-${a.kind}">${AGING_KINDS[a.kind]}</span></td>
-      <td><span class="badge e-${a.env}">${escapeHtml(a.env)}</span></td>
-      <td><b>${escapeHtml(agingSampleName(a))}</b>${a.active===false?' <span class="badge s-plan">종료</span>':''}</td>
-      <td style="white-space:nowrap;">${escapeHtml(a.owner||'')}</td>
-      <td style="white-space:nowrap;">${escapeHtml(a.start||'')}</td><td class="num">${elapsed}</td>
-      <td style="white-space:nowrap;">${last?escapeHtml(last.date.slice(2).replace(/-/g,'.')):dash}</td>
-      <td class="num">${last?last.cpu+'%':dash}</td><td class="num">${last?last.mem+'%':dash}</td>
-      <td>${last?resultPill(last.live):dash}</td><td>${last?resultPill(last.timeline):dash}</td><td>${last?resultPill(last.rec):dash}</td>
-      <td>${last?(checkHasFail(last)?'<span class="badge s-fail">문제 있음</span>':'<span class="badge s-done">이상 없음</span>'):dash}</td>
-      <td>${last&&checkHasFail(last)&&last.failReason?'<button class="btn small" data-act="reason" style="color:#791F1F;border-color:#E6A5A5;white-space:nowrap;">사유 보기</button>':dash}</td>
-      <td style="white-space:nowrap;"><button class="btn small primary" data-act="add">+ 점검</button> <button class="btn small" data-act="detail">이력</button> <button class="btn small" data-act="edit">수정</button></td>`;
-    const rb = tr.querySelector('[data-act=reason]');
-    if(rb) rb.onclick = ()=> showTextPopup(`${agingSampleName(a)} — FAIL 사유 (${last.date})`, last.failReason);
-    tr.querySelector('[data-act=add]').onclick = ()=> openCheckForm(a, null);
-    tr.querySelector('[data-act=detail]').onclick = ()=> openAgingDetail(a);
-    tr.querySelector('[data-act=edit]').onclick = ()=> openAgingForm(a);
-    tb.appendChild(tr);
-  });
-  host.appendChild(wrap);
-}
-
 // ---------------- Aging관리 (외부 모니터링 사이트 삽입) ----------------
 const BLAZE_URL = 'https://blaze-auto-aging.vercel.app/monitoring';
 function renderAgingMgmt(){
@@ -1594,7 +1355,6 @@ const TAB_DEFS = {
   overall:{btn:'tabOverall', view:'overallView', render:()=>renderOverall(), toolbar:true},
   person: {btn:'tabPerson',  view:'personView',  render:()=>renderPerson(),  toolbar:true},
   samples:{btn:'tabSamples', view:'samplesView', render:()=>renderSamples(), toolbar:false},
-  aging:  {btn:'tabAging',   view:'agingView',   render:()=>renderAging(),   toolbar:false},
   agingMgmt:{btn:'tabAgingMgmt', view:'agingMgmtView', render:()=>renderAgingMgmt(), toolbar:false}
 };
 function showTab(name){
