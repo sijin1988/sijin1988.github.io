@@ -153,6 +153,16 @@
   .sum-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px;}
   .sum-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;}
   .sum-label{font-size:12px;color:var(--ink-soft);}
+  .frame-bar{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12.5px;color:var(--ink-soft);}
+  .frame-bar a{color:var(--navy);font-weight:600;}
+  .frame-box{width:100%;height:calc(100vh - 190px);min-height:560px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);}
+  .brk{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:14px;}
+  .brk-box{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;}
+  .brk-head{display:flex;align-items:baseline;gap:8px;font-weight:700;color:var(--navy-deep);margin-bottom:8px;}
+  .brk-head small{font-weight:400;color:var(--ink-soft);font-size:12px;}
+  .brk-type{margin-top:8px;}
+  .brk-type-h{font-size:13px;font-weight:600;display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:3px;}
+  .brk-cpu{display:flex;justify-content:space-between;font-size:12.5px;color:var(--ink-soft);padding:2px 0 0 8px;}
   .sum-val{font-size:22px;font-weight:700;color:var(--navy-deep);}
   .sum-sub{font-size:11.5px;color:var(--ink-soft);}
   .tbl-wrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow-x:auto;}
@@ -201,6 +211,7 @@
     <button id="tabPerson">담당자별</button>
     <button id="tabSamples">보유시료현황</button>
     <button id="tabAging">Aging</button>
+    <button id="tabAgingMgmt">Aging관리</button>
   </div>
 
   <div class="toolbar" id="scheduleToolbar">
@@ -230,6 +241,7 @@
   <div id="personView" style="display:none;"></div>
   <div id="samplesView" style="display:none;"></div>
   <div id="agingView" style="display:none;"></div>
+  <div id="agingMgmtView" style="display:none;"></div>
 
   <div class="footer-actions">
     <div><span id="statusLabel">불러오는 중…</span> <button class="btn small" id="retrySaveBtn" style="display:none;margin-left:6px;">다시 저장</button></div>
@@ -1261,6 +1273,22 @@ function renderSamples(){
     + card('공통용', sumQty(all.filter(s=>s.scope==='shared'))+'대');
   host.appendChild(sum);
 
+  const brk = document.createElement('div'); brk.className = 'brk';
+  brk.innerHTML = Object.entries(SCOPES).map(([sk, sl])=>{
+    const rows = all.filter(s=>s.scope===sk);
+    const types = ['PC','Appliance'].map(t=>{
+      const tr = rows.filter(s=>s.name===t);
+      const byCpu = {};
+      tr.forEach(s=>{ const c = (s.cpu||'').trim() || '(미입력)'; byCpu[c] = (byCpu[c]||0) + (Number(s.qty)||0); });
+      const cpus = Object.entries(byCpu).sort((a,b)=>b[1]-a[1])
+        .map(([c,n])=>`<div class="brk-cpu"><span>${escapeHtml(c)}</span><span>${n}대</span></div>`).join('')
+        || '<div class="brk-cpu"><span>-</span></div>';
+      return `<div class="brk-type"><div class="brk-type-h"><span>${t}</span><span>${sumQty(tr)}대</span></div>${cpus}</div>`;
+    }).join('');
+    return `<div class="brk-box"><div class="brk-head">${escapeHtml(sl)} <small>총 ${sumQty(rows)}대</small></div>${types}</div>`;
+  }).join('');
+  host.appendChild(brk);
+
   const bar = document.createElement('div'); bar.className = 'toolbar';
   const opt = (arr, cur)=> arr.map(o=>`<option value="${escapeHtml(o[0])}"${o[0]===cur?' selected':''}>${escapeHtml(o[1])}</option>`).join('');
   bar.innerHTML = `<input type="text" id="smQ" placeholder="CPU/IP/평가항목/비고 검색" value="${escapeHtml(sampleFilter.q)}">
@@ -1552,12 +1580,22 @@ function renderAging(){
   host.appendChild(wrap);
 }
 
+// ---------------- Aging관리 (외부 모니터링 사이트 삽입) ----------------
+const BLAZE_URL = 'https://blaze-auto-aging.vercel.app/monitoring';
+function renderAgingMgmt(){
+  const host = document.getElementById('agingMgmtView');
+  if(host.firstChild) return; // iframe을 다시 만들지 않아 필터/스크롤 상태 유지
+  host.innerHTML = `<div class="frame-bar"><span>Blaze Aging 모니터링 (외부 사이트)</span><a href="${BLAZE_URL}" target="_blank" rel="noopener">새 창에서 열기 ↗</a><span>화면이 비어 있으면 새 창으로 열어주세요.</span></div>
+    <iframe class="frame-box" src="${BLAZE_URL}" title="Blaze Aging 모니터링" loading="lazy"></iframe>`;
+}
+
 // ---------------- 탭 전환 ----------------
 const TAB_DEFS = {
   overall:{btn:'tabOverall', view:'overallView', render:()=>renderOverall(), toolbar:true},
   person: {btn:'tabPerson',  view:'personView',  render:()=>renderPerson(),  toolbar:true},
   samples:{btn:'tabSamples', view:'samplesView', render:()=>renderSamples(), toolbar:false},
-  aging:  {btn:'tabAging',   view:'agingView',   render:()=>renderAging(),   toolbar:false}
+  aging:  {btn:'tabAging',   view:'agingView',   render:()=>renderAging(),   toolbar:false},
+  agingMgmt:{btn:'tabAgingMgmt', view:'agingMgmtView', render:()=>renderAgingMgmt(), toolbar:false}
 };
 function showTab(name){
   currentTab = name;
