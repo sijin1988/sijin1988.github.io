@@ -819,8 +819,11 @@ function renderPerson(){
 function personEntries(name, hideDone){
   const entries = [];
   const leaveTasks = [];
+  const d0 = new Date(), today = `${d0.getFullYear()}-${String(d0.getMonth()+1).padStart(2,'0')}-${String(d0.getDate()).padStart(2,'0')}`;
   data.tasks.filter(passesFilter).forEach(t=>{
     if(t.track==='leave'){
+      const lastDay = t.end || t.start;
+      if(lastDay && lastDay < today) return; // 기간이 지난 휴가/기타는 숨김 (데이터는 유지)
       if((t.assignees||[]).includes(name)) leaveTasks.push(t);
       return;
     }
