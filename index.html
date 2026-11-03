@@ -651,6 +651,8 @@ function renderTaskRow(t){
 }
 function escapeHtml(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
+// 달력 칸 안 정렬 순서: 휴가/교육 → TRACKS 정의 순서
+function calTrackRank(t){ return t.track==='leave' ? -1 : Object.keys(TRACKS).indexOf(t.track); }
 function renderCalendarView(){
   const wrap = document.createElement('div');
   wrap.className='timeline-wrap';
@@ -692,7 +694,8 @@ function renderCalendarView(){
     dated.filter(t=>{
       const e = t.end || t.start;
       return dateStr>=t.start && dateStr<=e;
-    }).forEach(t=>{
+    }).sort((a,b)=> calTrackRank(a)-calTrackRank(b) || a.title.localeCompare(b.title, 'ko')) // 휴가/교육 맨 위, 그 다음 같은 카테고리끼리 묶음
+    .forEach(t=>{
       const pill = document.createElement('div');
       pill.className = 'cal-pill badge b-'+t.track;
       pill.textContent = t.track==='leave' && (t.assignees||[]).length
