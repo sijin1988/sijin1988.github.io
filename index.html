@@ -1236,6 +1236,8 @@ function sampleChips(s){
   return (s.items||[]).map(i=>`<span class="chip" style="padding:1px 8px;font-size:11.5px;">${escapeHtml(i)}</span>`).join(' ');
 }
 function openSampleForm(sample){
+  // 저장/동기화 뒤에는 data 객체가 교체되므로, 화면 행이 들고 있는 옛 객체 대신 id로 최신 항목을 찾는다
+  if(sample) sample = data.samples.find(s=>s.id===sample.id) || sample;
   const people = personOptions(false);
   openFormModal({
     title: sample ? '보유시료 수정' : '보유시료 추가',
@@ -1253,7 +1255,9 @@ function openSampleForm(sample){
     ],
     onSave: v=>{
       if(v.owner) ensurePerson(v.owner);
-      if(sample) Object.assign(sample, v); else data.samples.push({id:uid(), ...v});
+      const cur = sample && data.samples.find(s=>s.id===sample.id);
+      if(cur) Object.assign(cur, v);
+      else data.samples.push({...(sample||{id:uid()}), ...v}); // 새 항목이거나, 그 사이 삭제된 항목이면 다시 등록
       scheduleSave(); renderSamples();
     },
     onDelete: sample ? ()=>{
