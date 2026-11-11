@@ -13,6 +13,7 @@
     --mobile-bg:#EEEDFE; --mobile-fg:#3C3489;
     --app-bg:#FAEEDA; --app-fg:#854F0B;
     --web-bg:#E1F5EE; --web-fg:#085041;
+    --storage-bg:#F0F3D6; --storage-fg:#5A6410;
     --etc-bg:#F1EFE8; --etc-fg:#444441;
     --leave-bg:#FBE7EE; --leave-fg:#9B2E52;
 
@@ -47,6 +48,7 @@
   .b-mobile{background:var(--mobile-bg);color:var(--mobile-fg);}
   .b-app{background:var(--app-bg);color:var(--app-fg);}
   .b-web{background:var(--web-bg);color:var(--web-fg);}
+  .b-storage{background:var(--storage-bg);color:var(--storage-fg);}
   .b-etc{background:var(--etc-bg);color:var(--etc-fg);}
   .b-leave{background:var(--leave-bg);color:var(--leave-fg);}
   .s-plan{background:var(--st-plan-bg);color:var(--st-plan-fg);}
@@ -218,6 +220,7 @@
       <option value="mobile">Mobile</option>
       <option value="app">Appliance</option>
       <option value="web">WebClient</option>
+      <option value="storage">저장장치</option>
       <option value="etc">공통/기타</option>
       <option value="leave">휴가/교육</option>
     </select>
@@ -262,6 +265,7 @@
           <option value="mobile">Mobile</option>
           <option value="app">Appliance</option>
           <option value="web">WebClient</option>
+          <option value="storage">저장장치</option>
           <option value="etc">공통/기타</option>
           <option value="leave">휴가/교육</option>
         </select>
@@ -297,7 +301,7 @@
 </div>
 
 <script>
-const TRACKS = {vms:'VMS', mobile:'Mobile', app:'Appliance', web:'WebClient', etc:'공통/기타', leave:'휴가/교육'};
+const TRACKS = {vms:'VMS', mobile:'Mobile', app:'Appliance', web:'WebClient', storage:'저장장치', etc:'공통/기타', leave:'휴가/교육'};
 const STATUSES = {plan:'예정', prog:'진행중', hold:'보류', fail:'FAIL', done:'완료'};
 
 let data = { tasks: [], people: [], periodOrder: {}, samples: [], aging: [], agingChecks: [] };
